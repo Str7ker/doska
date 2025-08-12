@@ -20,7 +20,6 @@ const pluralDays = (n) => {
     return 'дней';
 };
 
-// 👇 добавляем эту функцию
 const formatDDMM = (isoDateStr) => {
     if (!isoDateStr) return '';
     const [y, m, d] = isoDateStr.split('-').map(Number);
@@ -29,7 +28,7 @@ const formatDDMM = (isoDateStr) => {
     return `${dd}.${mm}`;
 };
 
-export default function TaskCard({ task, index, onEdit }) {
+export default function TaskCard({ task, index, onEdit, onDelete }) {
     const [openMenu, setOpenMenu] = useState(false);
     const menuRef = useRef(null);
 
@@ -104,7 +103,7 @@ export default function TaskCard({ task, index, onEdit }) {
                                     className="flex items-center gap-2 px-3 py-1 w-full hover:bg-[#CACACA]/20 transition text-14 text-dark"
                                     onClick={() => {
                                         setOpenMenu(false);
-                                        onEdit?.(task); // 👈 открываем модалку редактирования
+                                        onEdit?.(task);
                                     }}
                                 >
                                     <MdEdit className="w-4 h-4" />
@@ -112,7 +111,10 @@ export default function TaskCard({ task, index, onEdit }) {
                                 </button>
                                 <button
                                     className="flex items-center gap-2 px-3 py-1 w-full hover:bg-[#CACACA]/20 transition text-14 text-red-500"
-                                    onClick={() => alert("Удалить")}
+                                    onClick={() => {
+                                        setOpenMenu(false);
+                                        onDelete?.(task);
+                                    }}
                                 >
                                     <MdDelete className="w-4 h-4" />
                                     Удалить
@@ -123,7 +125,6 @@ export default function TaskCard({ task, index, onEdit }) {
 
                     <div className="p-4 flex flex-col gap-[10px]">
                         <div className="flex items-center gap-[6px]">
-                            {/* Тянем за иконку */}
                             <div
                                 className="text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity cursor-move"
                                 {...provided.dragHandleProps}

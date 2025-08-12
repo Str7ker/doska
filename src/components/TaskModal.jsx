@@ -85,7 +85,7 @@ export default function AddTaskModal({
             column: form.column,
             priority: form.priority,
             due_date: form.due_date || null,
-            responsible: form.responsible ? Number(form.responsible) : null,
+            responsible_id: form.responsible ? Number(form.responsible) : null,
         };
 
         onSubmit(payload);
