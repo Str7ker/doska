@@ -9,7 +9,7 @@ const colorMap = {
     green: "bg-green",
 };
 
-export default function TaskColumn({ title, color, tasks, isOver = false, onEdit }) {
+export default function TaskColumn({ title, color, tasks, isOver = false, onEdit, onDelete }) {
     return (
         <div
             className={[
@@ -50,7 +50,7 @@ export default function TaskColumn({ title, color, tasks, isOver = false, onEdit
             ) : (
                 <div className="flex flex-col gap-[10px] rounded-[10px] bg-white p-0.5">
                     {tasks.map((task, i) => (
-                        <TaskCard key={task.id} task={task} index={i} onEdit={onEdit} />
+                        <TaskCard key={task.id} task={task} index={i} onEdit={onEdit} onDelete={onDelete} />
                     ))}
                     {isOver && (
                         <div className="h-2 -mb-1 rounded-[4px] border border-dashed border-darkblue/50 bg-darkblue/10 transition-all" />

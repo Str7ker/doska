@@ -36,6 +36,40 @@ export default function App() {
     done: "green",
   };
 
+  // === API helper ===
+  const deleteTask = async (id) => {
+    const res = await fetch(`${BASE_URL}/api/tasks/${id}/`, {
+      method: 'DELETE',
+      credentials: 'include',
+    });
+    if (!res.ok && res.status !== 204) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`DELETE ${id} failed: ${res.status} ${text}`);
+    }
+  };
+
+  // === Handler ===
+  const handleDeleteTask = async (task) => {
+    if (!task?.id) return;
+
+    // подтверждение
+    if (!confirm(`Удалить задачу №${task.id} "${task.title}"? Это действие необратимо.`)) {
+      return;
+    }
+
+    // оптимистичное удаление
+    const prev = tasks;
+    setTasks((ts) => ts.filter(t => t.id !== task.id));
+
+    try {
+      await deleteTask(task.id);
+    } catch (e) {
+      console.error(e);
+      setTasks(prev); // откат
+      alert('Не удалось удалить задачу на сервере.');
+    }
+  };
+
   // Фильтр
   const q = searchQuery.trim().toLowerCase();
   const filteredTasks = q
@@ -204,8 +238,8 @@ export default function App() {
         // Ответственного кладём в state как ОБЪЕКТ (карточка ждёт object, не id)
         const optimisticPayload = {
           ...payload,
-          ...(payload.responsible !== undefined
-            ? { responsible: toRespObj(payload.responsible, users) }
+          ...(payload.responsible_id !== undefined
+            ? { responsible: toRespObj(payload.responsible_id, users) }
             : {}),
         };
 
@@ -221,9 +255,12 @@ export default function App() {
           // Сервер мог вернуть responsible как id → приводим к объекту
           const normalized = {
             ...updated,
+            // сервер вернёт вложенный 'responsible' (UserSerializer), но на всякий случай
             ...(updated.responsible !== undefined
               ? { responsible: toRespObj(updated.responsible, users) }
-              : {}),
+              : (payload.responsible_id !== undefined
+                ? { responsible: toRespObj(payload.responsible_id, users) }
+                : {})),
           };
 
           // Страхуемся: если сервер не вернул/переопределил completed_at/done_color — оставим наши
@@ -247,8 +284,8 @@ export default function App() {
           ...created,
           ...(created.responsible !== undefined
             ? { responsible: toRespObj(created.responsible, users) }
-            : (payload.responsible !== undefined
-              ? { responsible: toRespObj(payload.responsible, users) }
+            : (payload.responsible_id !== undefined
+              ? { responsible: toRespObj(payload.responsible_id, users) }
               : {})),
           ...(payload.completed_at !== undefined ? { completed_at: payload.completed_at } : {}),
           ...(payload.done_color !== undefined ? { done_color: payload.done_color } : {}),
@@ -293,8 +330,9 @@ export default function App() {
           </div>
           <div className="flex items-center gap-2 px-[10px] py-[2px] rounded-[10px] bg-[#CACACA33]">
             <FaCircle className="w-2 h-2 text-blue" />
-            <span className="text-14 font-medium">{tasks.filter(t => t.column === 'in_progress').length} Выполняется</span>
-          </div>
+            <span className="text-14 font-medium">
+              {tasks.filter(t => ['in_progress', 'testing', 'review'].includes(t.column)).length} Выполняется
+            </span>          </div>
           <div className="flex items-center gap-2 px-[10px] py-[2px] rounded-[10px] bg-[#CACACA33]">
             <FaCircle className="w-2 h-2 text-green" />
             <span className="text-14 font-medium">{tasks.filter(t => t.column === 'done').length} Сделано</span>
@@ -364,7 +402,8 @@ export default function App() {
                       color={colorByColumn[colKey]}
                       tasks={colTasks}
                       isOver={snapshot.isDraggingOver}
-                      onEdit={openEdit} // 👈 прокидываем коллбек редактирования
+                      onEdit={openEdit}
+                      onDelete={handleDeleteTask}
                     />
                     {provided.placeholder}
                   </div>
