@@ -1,21 +1,29 @@
-import { useState, useEffect } from 'react';
+// src/App.jsx
+import { useState, useEffect, useMemo } from 'react';
 import { FaPlus, FaCircle, FaSearch } from 'react-icons/fa';
-import { MdChecklist, MdPeople } from "react-icons/md";
-import TaskColumn from './components/TaskColumn';
+import { MdChecklist, MdPeople } from 'react-icons/md';
 import { DragDropContext, Droppable } from "@hello-pangea/dnd";
-import AddTaskModal from "./components/TaskModal"; // 👈 та же модалка, теперь и редактирует
 
+import TaskColumn from './components/TaskColumn';
+import AddTaskModal from "./components/TaskModal";
 import Switch from './components/Switch';
+import Header from './components/Header';
+import Login from './components/Login';
 
 const BASE_URL = import.meta.env.VITE_API_BASE || "http://localhost:8000";
 
 export default function App() {
+  // --- Авторизация ---
+  const [me, setMe] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  // --- UI состояния ---
   const [enabled, setEnabled] = useState(false);
   const [tasks, setTasks] = useState([]);
   const [users, setUsers] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
 
-  // modal state
+  // --- модалка создания/редактирования ---
   const [modalOpen, setModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -27,7 +35,6 @@ export default function App() {
     review: "Правки",
     done: "Выполнено"
   };
-
   const colorByColumn = {
     new: "gray",
     in_progress: "darkblue",
@@ -36,81 +43,40 @@ export default function App() {
     done: "green",
   };
 
-  // === API helper ===
-  const deleteTask = async (id) => {
-    const getCookie = (name) => (document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)')?.pop() || '');
-
-    const doDelete = async () => {
-      const res = await fetch(`${BASE_URL}/api/tasks/${id}/`, {
-        method: 'DELETE',
-        credentials: 'include',
-        headers: {
-          'X-CSRFToken': getCookie('csrftoken'),
-          'X-Requested-With': 'XMLHttpRequest',
-        },
-      });
-      if (!res.ok && res.status !== 204) {
-        const text = await res.text().catch(() => '');
-        throw new Error(`DELETE ${id} failed: ${res.status} ${text}`);
-      }
-    };
-
-    try {
-      await doDelete();
-    } catch (e) {
-      // если токена нет/просрочен — подтянуть и попробовать ещё раз
-      if (String(e.message).includes('403') && /CSRF|csrf/i.test(e.message)) {
-        await fetch(`${BASE_URL}/api/csrf/`, { credentials: 'include' });
-        await doDelete();
-      } else {
-        throw e;
-      }
-    }
+  // --- helpers ---
+  const getCookie = (name) => {
+    const m = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+    return m ? m.pop() : '';
   };
 
-  // === Handler ===
-  const handleDeleteTask = async (task) => {
-    if (!task?.id) return;
-
-    // подтверждение
-    if (!confirm(`Удалить задачу №${task.id} "${task.title}"? Это действие необратимо.`)) {
-      return;
-    }
-
-    // оптимистичное удаление
-    const prev = tasks;
-    setTasks((ts) => ts.filter(t => t.id !== task.id));
-
-    try {
-      await deleteTask(task.id);
-    } catch (e) {
-      console.error(e);
-      setTasks(prev); // откат
-      alert('Не удалось удалить задачу на сервере.');
-    }
-  };
-
-  // Фильтр
-  const q = searchQuery.trim().toLowerCase();
-  const filteredTasks = q
-    ? tasks.filter(t =>
-      (t.title || "").toLowerCase().includes(q) ||
-      (t.description || "").toLowerCase().includes(q)
-    )
-    : tasks;
-
-  // Раскладка по колонкам
-  const tasksByColumn = { new: [], in_progress: [], testing: [], review: [], done: [] };
-  filteredTasks.forEach(task => {
-    if (tasksByColumn[task.column]) {
-      tasksByColumn[task.column].push(task);
-    }
-  });
+  // Инициализация CSRF и проверка сессии
   useEffect(() => {
-    fetch(`${BASE_URL}/api/csrf/`, { credentials: 'include' }).catch(() => { });
+    (async () => {
+      try {
+        await fetch(`${BASE_URL}/api/csrf/`, { credentials: 'include' });
+      } catch { }
+      try {
+        const res = await fetch(`${BASE_URL}/api/me/`, { credentials: 'include' });
+        if (res.status === 401) {
+          setMe(null);
+        } else if (res.ok) {
+          const data = await res.json();
+          setMe(data);
+        } else {
+          setMe(null);
+        }
+      } catch {
+        setMe(null);
+      } finally {
+        setAuthLoading(false);
+      }
+    })();
   }, []);
 
+  // Загрузка задач и пользователей — только если авторизованы
   useEffect(() => {
+    if (!me) return;
+
     fetch(`${BASE_URL}/api/tasks/`, { credentials: 'include' })
       .then(async (res) => {
         if (!res.ok) {
@@ -122,12 +88,10 @@ export default function App() {
       .then((data) => setTasks(Array.isArray(data) ? data : []))
       .catch((e) => {
         console.error(e);
-        setTasks([]); // не даём упасть рендеру
+        setTasks([]);
         alert('Не удалось загрузить задачи (возможно, не авторизован).');
       });
-  }, []);
 
-  useEffect(() => {
     fetch(`${BASE_URL}/api/users/`, { credentials: 'include' })
       .then(async (res) => {
         if (!res.ok) {
@@ -141,13 +105,7 @@ export default function App() {
         console.error(e);
         setUsers([]);
       });
-  }, []);
-
-  // API helpers
-  const getCookie = (name) => {
-    const m = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
-    return m ? m.pop() : '';
-  };
+  }, [me]);
 
   // === Images API ===
   const uploadOneImage = async (taskId, file, position = 0) => {
@@ -155,9 +113,10 @@ export default function App() {
     if (!(file instanceof File)) throw new Error("Передан невалидный файл");
 
     const fd = new FormData();
-    fd.append("task", String(taskId)); // ID задачи как строка
-    fd.append("image", file);          // сам файл
-    fd.append("position", String(position)); // позиция
+    fd.append("task", String(taskId));
+    fd.append("image", file);
+    // Позицию бек кладёт сам в конец, можно не слать:
+    // fd.append("position", String(position));
 
     const res = await fetch(`${BASE_URL}/api/task-images/`, {
       method: "POST",
@@ -168,7 +127,6 @@ export default function App() {
       body: fd,
     });
 
-    // Логируем, если сервер вернул ошибку
     if (!res.ok) {
       let errorText = await res.text().catch(() => "");
       try {
@@ -180,9 +138,8 @@ export default function App() {
       }
     }
 
-    return res.json(); // Вернёт объект с id, url и т.п.
+    return res.json();
   };
-
 
   const deleteImage = async (imageId) => {
     const res = await fetch(`${BASE_URL}/api/task-images/${imageId}/`, {
@@ -202,14 +159,13 @@ export default function App() {
         "Content-Type": "application/json",
         "X-CSRFToken": getCookie("csrftoken"),
       },
-      body: JSON.stringify(patch), // например { position: 2 } или { task: 5, position: 0 }
+      body: JSON.stringify(patch),
     });
     if (!res.ok) throw new Error(`Patch image failed: ${res.status}`);
     return res.json();
   };
 
-  // createTask
-  // === API helper: create ===
+  // === Tasks API ===
   const createTask = async (payload) => {
     const doPost = async () => {
       const res = await fetch(`${BASE_URL}/api/tasks/`, {
@@ -223,7 +179,6 @@ export default function App() {
       });
       const text = await res.text().catch(() => '');
       if (!res.ok) {
-        // попробуем распарсить JSON-ошибку DRF
         let data;
         try { data = JSON.parse(text); } catch { data = null; }
         const msg = data ? JSON.stringify(data) : text;
@@ -231,11 +186,9 @@ export default function App() {
       }
       return JSON.parse(text);
     };
-
     try {
       return await doPost();
     } catch (e) {
-      // если CSRF отсутствует — подтянем и повторим ОДИН раз
       if (String(e.message).includes('403') && /CSRF|csrf/i.test(e.message)) {
         await fetch(`${BASE_URL}/api/csrf/`, { credentials: 'include' });
         return await doPost();
@@ -244,8 +197,6 @@ export default function App() {
     }
   };
 
-
-  // patchTask
   const patchTask = async (id, payload) => {
     const res = await fetch(`${BASE_URL}/api/tasks/${id}/`, {
       method: 'PATCH',
@@ -260,8 +211,46 @@ export default function App() {
     return res.json();
   };
 
+  const deleteTask = async (id) => {
+    const doDelete = async () => {
+      const res = await fetch(`${BASE_URL}/api/tasks/${id}/`, {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: {
+          'X-CSRFToken': getCookie('csrftoken'),
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+      });
+      if (!res.ok && res.status !== 204) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`DELETE ${id} failed: ${res.status} ${text}`);
+      }
+    };
 
-  // DnD
+    try {
+      await doDelete();
+    } catch (e) {
+      if (String(e.message).includes('403') && /CSRF|csrf/i.test(e.message)) {
+        await fetch(`${BASE_URL}/api/csrf/`, { credentials: 'include' });
+        await doDelete();
+      } else {
+        throw e;
+      }
+    }
+  };
+
+  // === Drag & Drop ===
+  const computeDoneColor = (completedISO, dueISO) => {
+    if (!completedISO || !dueISO) return 'bg-gray border border-gray text-gray-700';
+    const c = new Date(completedISO);
+    const d = new Date(dueISO);
+    c.setHours(0, 0, 0, 0);
+    d.setHours(0, 0, 0, 0);
+    return c.getTime() > d.getTime()
+      ? 'bg-[#FFBCBC] border border-red text-red'
+      : 'bg-[#A6FFC3] border border-green text-green-700';
+  };
+
   const onDragEnd = async (result) => {
     const { destination, source, draggableId } = result;
     if (!destination) return;
@@ -306,40 +295,17 @@ export default function App() {
     }
   };
 
-  const computeDoneColor = (completedISO, dueISO) => {
-    if (!completedISO || !dueISO) return 'bg-gray border border-gray text-gray-700';
-    const c = new Date(completedISO);
-    const d = new Date(dueISO);
-    c.setHours(0, 0, 0, 0);
-    d.setHours(0, 0, 0, 0);
-    return c.getTime() > d.getTime()
-      ? 'bg-[#FFBCBC] border border-red text-red'
-      : 'bg-[#A6FFC3] border border-green text-green-700';
-  };
-
   // Превращаем responsible (id или объект) в объект пользователя из списка users
-  const toRespObj = (val, users) => {
+  const toRespObj = (val, usersList) => {
     if (!val) return null;
     if (typeof val === 'object') return val;
-    if (typeof val === 'number') return users.find(u => u.id === val) || { id: val };
+    if (typeof val === 'number') return usersList.find(u => u.id === val) || { id: val };
     return null;
   };
 
-  // Handlers
-  const openCreate = () => {
-    setEditingTask(null);
-    setModalOpen(true);
-  };
-
-  const openEdit = (task) => {
-    setEditingTask(task);
-    setModalOpen(true);
-  };
-
-  const closeModal = () => {
-    setModalOpen(false);
-    setEditingTask(null);
-  };
+  const openCreate = () => { setEditingTask(null); setModalOpen(true); };
+  const openEdit = (task) => { setEditingTask(task); setModalOpen(true); };
+  const closeModal = () => { setModalOpen(false); setEditingTask(null); };
 
   const handleSubmitTask = async (formPayload) => {
     try {
@@ -349,20 +315,16 @@ export default function App() {
       const goingDone = formPayload.column === 'done';
       const dueForColor = editingTask?.due_date ?? formPayload.due_date ?? null;
 
-      // Базовый payload в API
       let payload = { ...formPayload };
       if (goingDone) {
         payload.completed_at = todayISO;
         payload.done_color = computeDoneColor(todayISO, dueForColor);
       }
-      // Если нужно очищать при уходе из done — раскомментируй:
-      // else { payload.completed_at = null; payload.done_color = null; }
 
       if (editingTask) {
-        // ===== РЕЖИМ РЕДАКТИРОВАНИЯ =====
+        // ===== РЕДАКТИРОВАНИЕ =====
         const prevTasks = tasks;
 
-        // Оптимистичное обновление (ответственного кладём объектом)
         const optimisticPatch = {
           ...payload,
           ...(payload.responsible_id !== undefined
@@ -372,7 +334,7 @@ export default function App() {
         setTasks(ts => ts.map(t => t.id === editingTask.id ? { ...t, ...optimisticPatch } : t));
 
         try {
-          // 1) PATCH самой задачи
+          // 1) PATCH задачи
           await patchTask(editingTask.id, payload);
 
           const {
@@ -381,16 +343,15 @@ export default function App() {
             __reorder = [],
           } = formPayload;
 
-          // 2) Сначала УДАЛЯЕМ те, что помечены
+          // 2) Удаляем помеченные
           for (const id of __deleteImageIds) {
             try { await deleteImage(id); } catch (err) { console.warn('deleteImage:', err); }
           }
 
-          // 3) Подтягиваем свежую задачу (после удаления), чтобы знать актуальную длину массива
-          let refreshed = await fetch(`${BASE_URL}/api/tasks/${editingTask.id}/`, { credentials: 'include' })
-            .then(r => r.json());
+          // 3) Рефреш для знания текущей длины
+          let refreshed = await fetch(`${BASE_URL}/api/tasks/${editingTask.id}/`, { credentials: 'include' }).then(r => r.json());
 
-          // 4) Загружаем НОВЫЕ файлы подряд (позиции от текущей длины)
+          // 4) Загружаем новые подряд
           const startPos = Array.isArray(refreshed.images) ? refreshed.images.length : 0;
           for (let i = 0; i < __newFiles.length; i++) {
             try {
@@ -400,18 +361,19 @@ export default function App() {
             }
           }
 
-          // 5) Если есть перестановки, применяем их
+          // 5) Перестановки (безопасно на бэке)
           for (const { id, position } of __reorder) {
             try {
               await patchImage(id, { position });
-            } catch { }
+            } catch (err) {
+              console.warn('patchImage:', err);
+            }
           }
 
-          // 6) Финальный рефреш задачи (с уже загруженными/переставленными фотками)
-          refreshed = await fetch(`${BASE_URL}/api/tasks/${editingTask.id}/`, { credentials: 'include' })
-            .then(r => r.json());
+          // 6) Финальный рефреш
+          refreshed = await fetch(`${BASE_URL}/api/tasks/${editingTask.id}/`, { credentials: 'include' }).then(r => r.json());
 
-          // 7) Нормализуем responsible и страхуем done-поля
+          // 7) Нормализация responsible + страховка done-полей
           const normalized = {
             ...refreshed,
             ...(refreshed.responsible !== undefined
@@ -423,7 +385,7 @@ export default function App() {
             ...(payload.done_color !== undefined ? { done_color: payload.done_color } : {}),
           };
 
-          // 8) Обновляем в общем списке
+          // 8) Обновляем в списке
           setTasks(prev => prev.map(t => (t.id === refreshed.id ? normalized : t)));
 
           // Закрываем модалку
@@ -431,15 +393,13 @@ export default function App() {
           setEditingTask(null);
         } catch (e) {
           console.error(e);
-          setTasks(prevTasks); // откат оптимистики
+          setTasks(prevTasks);
           alert('Не удалось сохранить задачу.');
         }
       } else {
-        // ===== РЕЖИМ СОЗДАНИЯ =====
-        // 1) Создаём задачу
+        // ===== СОЗДАНИЕ =====
         const created = await createTask(payload);
 
-        // 2) Если прикладывали файлы — грузим их
         const { __newFiles = [] } = formPayload;
         for (let i = 0; i < __newFiles.length; i++) {
           try {
@@ -449,9 +409,7 @@ export default function App() {
           }
         }
 
-        // 3) Подтягиваем полную задачу с сервера (важно: с credentials)
-        const createdFull = await fetch(`${BASE_URL}/api/tasks/${created.id}/`, { credentials: 'include' })
-          .then(r => r.json());
+        const createdFull = await fetch(`${BASE_URL}/api/tasks/${created.id}/`, { credentials: 'include' }).then(r => r.json());
 
         const createdNormalized = {
           ...createdFull,
@@ -464,9 +422,8 @@ export default function App() {
           ...(payload.done_color !== undefined ? { done_color: payload.done_color } : {}),
         };
 
-        // 4) Вставляем в начало списка
         setTasks(prev => [createdNormalized, ...prev]);
-        setSearchQuery(""); // чтобы новая задача не спряталась под поиском
+        setSearchQuery("");
         setModalOpen(false);
         setEditingTask(null);
       }
@@ -478,126 +435,196 @@ export default function App() {
     }
   };
 
+  const handleDeleteTask = async (task) => {
+    if (!task?.id) return;
+    if (!confirm(`Удалить задачу №${task.id} "${task.title}"? Это действие необратимо.`)) return;
 
+    const prev = tasks;
+    setTasks((ts) => ts.filter(t => t.id !== task.id));
 
+    try {
+      await deleteTask(task.id);
+    } catch (e) {
+      console.error(e);
+      setTasks(prev);
+      alert('Не удалось удалить задачу на сервере.');
+    }
+  };
 
+  const handleLogout = async () => {
+    try {
+      await fetch(`${BASE_URL}/api/csrf/`, { credentials: "include" });
+      await fetch(`${BASE_URL}/api/logout/`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "X-CSRFToken": getCookie("csrftoken") },
+      });
+    } finally {
+      setMe(null);
+      setTasks([]);
+      setUsers([]);
+    }
+  };
+
+  // --- Фильтрация/раскладка ---
+  const q = searchQuery.trim().toLowerCase();
+
+  const myFiltered = useMemo(() => {
+    const base = q
+      ? tasks.filter(t =>
+        (t.title || "").toLowerCase().includes(q) ||
+        (t.description || "").toLowerCase().includes(q)
+      )
+      : tasks;
+
+    if (enabled && me?.id) {
+      return base.filter(t => t.responsible?.id === me.id);
+    }
+    return base;
+  }, [tasks, q, enabled, me]);
+
+  const tasksByColumn = useMemo(() => {
+    const dict = { new: [], in_progress: [], testing: [], review: [], done: [] };
+    myFiltered.forEach(task => { if (dict[task.column]) dict[task.column].push(task); });
+    return dict;
+  }, [myFiltered]);
+
+  // --- Рендер ---
+  if (authLoading) {
+    return <div className="min-h-screen bg-[#F4F5F8]" />;
+  }
+
+  if (!me) {
+    return (
+      <Login
+        baseUrl={BASE_URL}
+        onSuccess={(user) => setMe(user)}
+      />
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-white py-10 px-4 ">
-      <div className="max-w-screen-2xl mx-auto  ">
-        <div className="flex justify-between items-center mb-3 ">
-          <div>
-            <h1 className="text-18 font-medium">Заголовок проекта</h1>
-            <h1 className="text-16">Описание проекта</h1>
-          </div>
-          <button
-            onClick={openCreate}
-            className="group flex items-center gap-2 rounded-[20px] px-[20px] py-[10px] border border-dashed border-darkblue text-darkblue transition hover:bg-darkblue"
-          >
-            <FaPlus className="w-4 h-4 text-darkblue transition group-hover:text-white" />
-            <span className="text-14 font-medium transition group-hover:text-white">ДОБАВИТЬ ЗАДАЧУ</span>
-          </button>
-        </div>
+    <div className="min-h-screen bg-white">
+      <Header
+        logoSrc="/logo.svg"
+        projectLabel="Проекты"
+        username={me?.username || "Пользователь"}
+        unreadCount={0}
+        onLogout={handleLogout}
+      />
 
-        <div className="flex gap-3 items-center mb-3">
-          <div className="flex items-center gap-2 px-[10px] py-[2px] rounded-[10px] bg-[#CACACA33]">
-            <MdChecklist className="w-4 h-4 text-dark" />
-            <span className="text-14 font-medium">{tasks.length} Всего</span>
-          </div>
-          <div className="flex items-center gap-2 px-[10px] py-[2px] rounded-[10px] bg-[#CACACA33]">
-            <FaCircle className="w-2 h-2 text-blue" />
-            <span className="text-14 font-medium">
-              {tasks.filter(t => ['in_progress', 'testing', 'review'].includes(t.column)).length} Выполняется
-            </span>          </div>
-          <div className="flex items-center gap-2 px-[10px] py-[2px] rounded-[10px] bg-[#CACACA33]">
-            <FaCircle className="w-2 h-2 text-green" />
-            <span className="text-14 font-medium">{tasks.filter(t => t.column === 'done').length} Сделано</span>
-          </div>
-          <div className="flex items-center gap-2 px-[10px] py-[2px] rounded-[10px] bg-[#CACACA33]">
-            <MdPeople className="w-4 h-4 text-dark" />
-            <span className="text-14 font-medium">{users.length} В проекте</span>
-          </div>
-          <div className="flex items-center gap-3">
-            <Switch enabled={enabled} setEnabled={setEnabled} />
-            <p className="text-sm">{enabled ? 'Мои задачи' : 'Все задачи'}</p>
-          </div>
-          <div className="flex-grow flex items-center gap-2 px-[15px] py-[4px] rounded-[10px] border border-[#D8D8D8] bg-[#CACACA33] min-w-0">
-            <FaSearch className="w-4 h-4 text-gray-500" />
-            <input
-              type="text"
-              placeholder="Поиск задач"
-              className="bg-transparent outline-none text-sm w-full placeholder-gray-500"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
+      <div className="py-10 px-4 ">
+        <div className="max-w-screen-2xl mx-auto">
+          <div className="flex justify-between items-center mb-3">
+            <div>
+              <h1 className="text-18 font-medium">Заголовок проекта</h1>
+              <h1 className="text-16">Описание проекта</h1>
+            </div>
+            <button
+              onClick={() => setModalOpen(true)}
+              className="group flex items-center gap-2 rounded-[20px] px-[20px] py-[10px] border border-dashed border-darkblue text-darkblue transition hover:bg-darkblue"
+            >
+              <FaPlus className="w-4 h-4 text-darkblue transition group-hover:text-white" />
+              <span className="text-14 font-medium transition group-hover:text-white">ДОБАВИТЬ ЗАДАЧУ</span>
+            </button>
           </div>
 
-        </div>
+          <div className="flex gap-3 items-center mb-3">
+            <div className="flex items-center gap-2 px-[10px] py-[2px] rounded-[10px] bg-[#CACACA33]">
+              <MdChecklist className="w-4 h-4 text-dark" />
+              <span className="text-14 font-medium">{tasks.length} Всего</span>
+            </div>
+            <div className="flex items-center gap-2 px-[10px] py-[2px] rounded-[10px] bg-[#CACACA33]">
+              <FaCircle className="w-2 h-2 text-blue" />
+              <span className="text-14 font-medium">
+                {tasks.filter(t => ['in_progress', 'testing', 'review'].includes(t.column)).length} Выполняется
+              </span>
+            </div>
+            <div className="flex items-center gap-2 px-[10px] py-[2px] rounded-[10px] bg-[#CACACA33]">
+              <FaCircle className="w-2 h-2 text-green" />
+              <span className="text-14 font-medium">{tasks.filter(t => t.column === 'done').length} Сделано</span>
+            </div>
+            <div className="flex items-center gap-2 px-[10px] py-[2px] rounded-[10px] bg-[#CACACA33]">
+              <MdPeople className="w-4 h-4 text-dark" />
+              <span className="text-14 font-medium">{users.length} В проекте</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <Switch enabled={enabled} setEnabled={setEnabled} />
+              <p className="text-sm">{enabled ? 'Мои задачи' : 'Все задачи'}</p>
+            </div>
+            <div className="flex-grow flex items-center gap-2 px-[15px] py-[4px] rounded-[10px] border border-[#D8D8D8] bg-[#CACACA33] min-w-0">
+              <FaSearch className="w-4 h-4 text-gray-500" />
+              <input
+                type="text"
+                placeholder="Поиск задач"
+                className="bg-transparent outline-none text-sm w-full placeholder-gray-500"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+          </div>
 
-        <hr className="w-full h-[1px] bg-[#D8D8D8] border-none mb-3" />
+          <hr className="w-full h-[1px] bg-[#D8D8D8] border-none mb-3" />
 
-        {/* Заголовки колонок */}
-        <div className="flex gap-[15px] w-full mb-3">
-          {['gray', 'darkblue', 'yellow', 'red', 'green'].map((color, i) => (
-            <div key={i} className="relative flex-1 px-[20px] py-[10px] rounded-[15px] border border-gray bg-white overflow-hidden">
-              <div className={`absolute left-0 top-0 bottom-0 w-[11px] bg-${color} z-10`} />
-              <div className="absolute left-[6px] top-1/2 -translate-y-1/2 w-[30px] h-[50px] bg-white rounded-full z-10" />
-              <div className="relative z-20 flex justify-between items-center">
-                <span className="text-16 text-dark">
-                  {['Новые', 'Выполняются', 'Тестирование', 'Правки', 'Выполнено'][i]}
-                </span>
-                <div className="w-6 h-6 rounded-full bg-gray/50 flex items-center justify-center ml-2">
-                  <span className="text-16 text-black">{
-                    [
-                      tasksByColumn.new.length,
-                      tasksByColumn.in_progress.length,
-                      tasksByColumn.testing.length,
-                      tasksByColumn.review.length,
-                      tasksByColumn.done.length
-                    ][i]
-                  }</span>
+          {/* Заголовки колонок */}
+          <div className="flex gap-[15px] w-full mb-3">
+            {['gray', 'darkblue', 'yellow', 'red', 'green'].map((color, i) => (
+              <div key={i} className="relative flex-1 px-[20px] py-[10px] rounded-[15px] border border-gray bg-white overflow-hidden">
+                <div className={`absolute left-0 top-0 bottom-0 w-[11px] bg-${color} z-10`} />
+                <div className="absolute left-[6px] top-1/2 -translate-y-1/2 w-[30px] h-[50px] bg-white rounded-full z-10" />
+                <div className="relative z-20 flex justify-between items-center">
+                  <span className="text-16 text-dark">
+                    {['Новые', 'Выполняются', 'Тестирование', 'Правки', 'Выполнено'][i]}
+                  </span>
+                  <div className="w-6 h-6 rounded-full bg-gray/50 flex items-center justify-center ml-2">
+                    <span className="text-16 text-black">{
+                      [
+                        tasksByColumn.new.length,
+                        tasksByColumn.in_progress.length,
+                        tasksByColumn.testing.length,
+                        tasksByColumn.review.length,
+                        tasksByColumn.done.length
+                      ][i]
+                    }</span>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Контейнеры задач с DnD */}
-        <DragDropContext onDragEnd={onDragEnd}>
-          <div className="flex gap-[15px] w-full items-start">
-            {Object.entries(tasksByColumn).map(([colKey, colTasks]) => (
-              <Droppable droppableId={colKey} key={colKey}>
-                {(provided, snapshot) => (
-                  <div
-                    ref={provided.innerRef}
-                    {...provided.droppableProps}
-                    className="flex-1"
-                  >
-                    <TaskColumn
-                      title={columnTypes[colKey]}
-                      color={colorByColumn[colKey]}
-                      tasks={colTasks}
-                      isOver={snapshot.isDraggingOver}
-                      onEdit={openEdit}
-                      onDelete={handleDeleteTask}
-                    />
-                    {provided.placeholder}
-                  </div>
-                )}
-              </Droppable>
             ))}
           </div>
-        </DragDropContext>
 
-        {/* Единая модалка "создать/изменить" */}
-        <AddTaskModal
-          open={modalOpen}
-          onClose={closeModal}
-          onSubmit={handleSubmitTask}
-          users={users}
-          loading={saving}
-          initialTask={editingTask} // 👈 если есть — редактируем
-        />
+          {/* Контейнеры задач с DnD */}
+          <DragDropContext onDragEnd={onDragEnd}>
+            <div className="flex gap-[15px] w-full items-start">
+              {Object.entries(tasksByColumn).map(([colKey, colTasks]) => (
+                <Droppable droppableId={colKey} key={colKey}>
+                  {(provided, snapshot) => (
+                    <div ref={provided.innerRef} {...provided.droppableProps} className="flex-1">
+                      <TaskColumn
+                        title={columnTypes[colKey]}
+                        color={colorByColumn[colKey]}
+                        tasks={colTasks}
+                        isOver={snapshot.isDraggingOver}
+                        onEdit={openEdit}
+                        onDelete={handleDeleteTask}
+                      />
+                      {provided.placeholder}
+                    </div>
+                  )}
+                </Droppable>
+              ))}
+            </div>
+          </DragDropContext>
+
+          {/* Единая модалка "создать/изменить" */}
+          <AddTaskModal
+            open={modalOpen}
+            onClose={closeModal}
+            onSubmit={handleSubmitTask}
+            users={users}
+            loading={saving}
+            initialTask={editingTask}
+          />
+        </div>
       </div>
     </div>
   );

@@ -11,6 +11,7 @@ from rest_framework.response import Response
 
 from .models import Task, TaskImage
 from .serializers import TaskSerializer, TaskImageSerializer, UserSerializer
+from django.contrib.auth import authenticate, login as dj_login, logout as dj_logout
 
 # === NEW: Pillow-based compression ===
 from io import BytesIO
@@ -100,6 +101,36 @@ def compress_image_to_best(file_obj, prefer_webp=True):
         )
         return out, new_name
 
+@api_view(["GET"])
+@permission_classes([permissions.AllowAny])
+def me(request):
+    if not request.user.is_authenticated:
+        return Response({"detail": "unauthenticated"}, status=401)
+    data = UserSerializer(request.user, context={"request": request}).data
+    return Response(data)
+
+@api_view(["POST"])
+@permission_classes([permissions.AllowAny])
+def login(request):
+    # Требуется CSRF: перед этим фронт дергает /api/csrf/
+    username = (request.data.get("username") or "").strip()
+    password = (request.data.get("password") or "")
+    if not username or not password:
+        return Response({"detail": "Введите логин и пароль"}, status=400)
+
+    user = authenticate(request, username=username, password=password)
+    if user is None:
+        return Response({"detail": "Неверный логин или пароль"}, status=400)
+
+    dj_login(request, user)
+    data = UserSerializer(user, context={"request": request}).data
+    return Response(data, status=200)
+
+@api_view(["POST"])
+@permission_classes([permissions.AllowAny])
+def logout(request):
+    dj_logout(request)
+    return Response({"detail": "ok"}, status=200)
 
 @api_view(["GET"])
 @permission_classes([permissions.AllowAny])
