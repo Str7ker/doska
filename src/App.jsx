@@ -7,7 +7,7 @@ import AddTaskModal from "./components/TaskModal"; // 👈 та же модал�
 
 import Switch from './components/Switch';
 
-const BASE_URL = 'http://127.0.0.1:8000';
+const BASE_URL = import.meta.env.VITE_API_BASE || "http://localhost:8000";
 
 export default function App() {
   const [enabled, setEnabled] = useState(false);
@@ -86,49 +86,160 @@ export default function App() {
       tasksByColumn[task.column].push(task);
     }
   });
-
   useEffect(() => {
-    fetch(`${BASE_URL}/api/tasks/`)
-      .then(res => res.json())
-      .then(data => setTasks(data))
-      .catch(console.error);
+    fetch(`${BASE_URL}/api/csrf/`, { credentials: 'include' }).catch(() => { });
   }, []);
 
   useEffect(() => {
-    fetch(`${BASE_URL}/api/users/`)
-      .then(res => res.json())
-      .then(data => setUsers(data))
-      .catch(console.error);
+    fetch(`${BASE_URL}/api/tasks/`, { credentials: 'include' })
+      .then(async (res) => {
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          throw new Error(`GET /tasks ${res.status} ${text}`);
+        }
+        return res.json();
+      })
+      .then((data) => setTasks(Array.isArray(data) ? data : []))
+      .catch((e) => {
+        console.error(e);
+        setTasks([]); // не даём упасть рендеру
+        alert('Не удалось загрузить задачи (возможно, не авторизован).');
+      });
+  }, []);
+
+  useEffect(() => {
+    fetch(`${BASE_URL}/api/users/`, { credentials: 'include' })
+      .then(async (res) => {
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          throw new Error(`GET /users ${res.status} ${text}`);
+        }
+        return res.json();
+      })
+      .then((data) => setUsers(Array.isArray(data) ? data : []))
+      .catch((e) => {
+        console.error(e);
+        setUsers([]);
+      });
   }, []);
 
   // API helpers
-  const createTask = async (payload) => {
-    const res = await fetch(`${BASE_URL}/api/tasks/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify(payload),
+  const getCookie = (name) => {
+    const m = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
+    return m ? m.pop() : '';
+  };
+
+  // === Images API ===
+  const uploadOneImage = async (taskId, file, position = 0) => {
+    if (!taskId) throw new Error("Не указан ID задачи для загрузки изображения");
+    if (!(file instanceof File)) throw new Error("Передан невалидный файл");
+
+    const fd = new FormData();
+    fd.append("task", String(taskId)); // ID задачи как строка
+    fd.append("image", file);          // сам файл
+    fd.append("position", String(position)); // позиция
+
+    const res = await fetch(`${BASE_URL}/api/task-images/`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "X-CSRFToken": getCookie("csrftoken"),
+      },
+      body: fd,
     });
+
+    // Логируем, если сервер вернул ошибку
     if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`POST failed: ${res.status} ${text}`);
+      let errorText = await res.text().catch(() => "");
+      try {
+        const jsonErr = JSON.parse(errorText);
+        console.error("Ошибка загрузки изображения:", jsonErr);
+        throw new Error(`Upload failed: ${res.status} ${JSON.stringify(jsonErr)}`);
+      } catch {
+        throw new Error(`Upload failed: ${res.status} ${errorText}`);
+      }
     }
+
+    return res.json(); // Вернёт объект с id, url и т.п.
+  };
+
+
+  const deleteImage = async (imageId) => {
+    const res = await fetch(`${BASE_URL}/api/task-images/${imageId}/`, {
+      method: "DELETE",
+      credentials: "include",
+      headers: { "X-CSRFToken": getCookie("csrftoken") },
+    });
+    if (!res.ok && res.status !== 204) throw new Error(`Delete failed: ${res.status}`);
+  };
+
+  const patchImage = async (imageId, patch) => {
+    const res = await fetch(`${BASE_URL}/api/task-images/${imageId}/`, {
+      method: "PATCH",
+      credentials: "include",
+      headers: {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "X-CSRFToken": getCookie("csrftoken"),
+      },
+      body: JSON.stringify(patch), // например { position: 2 } или { task: 5, position: 0 }
+    });
+    if (!res.ok) throw new Error(`Patch image failed: ${res.status}`);
     return res.json();
   };
 
+  // createTask
+  // === API helper: create ===
+  const createTask = async (payload) => {
+    const doPost = async () => {
+      const res = await fetch(`${BASE_URL}/api/tasks/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': getCookie('csrftoken'),
+        },
+        credentials: 'include',
+        body: JSON.stringify(payload),
+      });
+      const text = await res.text().catch(() => '');
+      if (!res.ok) {
+        // попробуем распарсить JSON-ошибку DRF
+        let data;
+        try { data = JSON.parse(text); } catch { data = null; }
+        const msg = data ? JSON.stringify(data) : text;
+        throw new Error(`POST /tasks ${res.status}: ${msg || 'Unknown error'}`);
+      }
+      return JSON.parse(text);
+    };
+
+    try {
+      return await doPost();
+    } catch (e) {
+      // если CSRF отсутствует — подтянем и повторим ОДИН раз
+      if (String(e.message).includes('403') && /CSRF|csrf/i.test(e.message)) {
+        await fetch(`${BASE_URL}/api/csrf/`, { credentials: 'include' });
+        return await doPost();
+      }
+      throw e;
+    }
+  };
+
+
+  // patchTask
   const patchTask = async (id, payload) => {
     const res = await fetch(`${BASE_URL}/api/tasks/${id}/`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRFToken': getCookie('csrftoken'),
+      },
       credentials: 'include',
       body: JSON.stringify(payload),
     });
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`PATCH ${id} failed: ${res.status} ${text}`);
-    }
+    if (!res.ok) { const t = await res.text().catch(() => ''); throw new Error(`PATCH ${id} failed: ${res.status} ${t}`); }
     return res.json();
   };
+
 
   // DnD
   const onDragEnd = async (result) => {
@@ -214,76 +325,118 @@ export default function App() {
     try {
       setSaving(true);
 
-      const todayISO = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+      const todayISO = new Date().toISOString().slice(0, 10);
       const goingDone = formPayload.column === 'done';
       const dueForColor = editingTask?.due_date ?? formPayload.due_date ?? null;
 
-      // Готовим payload для API
+      // Базовый payload в API
       let payload = { ...formPayload };
       if (goingDone) {
         payload.completed_at = todayISO;
-        // computeDoneColor должен быть объявлен выше (зелёный если в срок, красный если просрочено)
         payload.done_color = computeDoneColor(todayISO, dueForColor);
       }
-      // Если нужно очищать дату/цвет при выходе из done — раскомментируй:
-      // else {
-      //   payload.completed_at = null;
-      //   payload.done_color = null;
-      // }
+      // Если нужно очищать при уходе из done — раскомментируй:
+      // else { payload.completed_at = null; payload.done_color = null; }
 
       if (editingTask) {
-        // ===== Оптимистичное обновление в списке =====
+        // ===== РЕЖИМ РЕДАКТИРОВАНИЯ =====
         const prevTasks = tasks;
 
-        // Ответственного кладём в state как ОБЪЕКТ (карточка ждёт object, не id)
-        const optimisticPayload = {
+        // Оптимистичное обновление (ответственного кладём объектом)
+        const optimisticPatch = {
           ...payload,
           ...(payload.responsible_id !== undefined
             ? { responsible: toRespObj(payload.responsible_id, users) }
             : {}),
         };
-
-        const optimistic = tasks.map(t =>
-          t.id === editingTask.id ? { ...t, ...optimisticPayload } : t
-        );
-        setTasks(optimistic);
+        setTasks(ts => ts.map(t => t.id === editingTask.id ? { ...t, ...optimisticPatch } : t));
 
         try {
-          // ===== PATCH на сервер =====
-          const updated = await patchTask(editingTask.id, payload);
+          // 1) PATCH самой задачи
+          await patchTask(editingTask.id, payload);
 
-          // Сервер мог вернуть responsible как id → приводим к объекту
+          const {
+            __newFiles = [],
+            __deleteImageIds = [],
+            __reorder = [],
+          } = formPayload;
+
+          // 2) Сначала УДАЛЯЕМ те, что помечены
+          for (const id of __deleteImageIds) {
+            try { await deleteImage(id); } catch (err) { console.warn('deleteImage:', err); }
+          }
+
+          // 3) Подтягиваем свежую задачу (после удаления), чтобы знать актуальную длину массива
+          let refreshed = await fetch(`${BASE_URL}/api/tasks/${editingTask.id}/`, { credentials: 'include' })
+            .then(r => r.json());
+
+          // 4) Загружаем НОВЫЕ файлы подряд (позиции от текущей длины)
+          const startPos = Array.isArray(refreshed.images) ? refreshed.images.length : 0;
+          for (let i = 0; i < __newFiles.length; i++) {
+            try {
+              await uploadOneImage(editingTask.id, __newFiles[i], startPos + i);
+            } catch (err) {
+              console.warn('uploadOneImage:', err);
+            }
+          }
+
+          // 5) Если есть перестановки, применяем их
+          for (const { id, position } of __reorder) {
+            try {
+              await patchImage(id, { position });
+            } catch { }
+          }
+
+          // 6) Финальный рефреш задачи (с уже загруженными/переставленными фотками)
+          refreshed = await fetch(`${BASE_URL}/api/tasks/${editingTask.id}/`, { credentials: 'include' })
+            .then(r => r.json());
+
+          // 7) Нормализуем responsible и страхуем done-поля
           const normalized = {
-            ...updated,
-            // сервер вернёт вложенный 'responsible' (UserSerializer), но на всякий случай
-            ...(updated.responsible !== undefined
-              ? { responsible: toRespObj(updated.responsible, users) }
+            ...refreshed,
+            ...(refreshed.responsible !== undefined
+              ? { responsible: toRespObj(refreshed.responsible, users) }
               : (payload.responsible_id !== undefined
                 ? { responsible: toRespObj(payload.responsible_id, users) }
                 : {})),
-          };
-
-          // Страхуемся: если сервер не вернул/переопределил completed_at/done_color — оставим наши
-          const merged = {
-            ...normalized,
             ...(payload.completed_at !== undefined ? { completed_at: payload.completed_at } : {}),
             ...(payload.done_color !== undefined ? { done_color: payload.done_color } : {}),
           };
 
-          setTasks(prev => prev.map(t => (t.id === merged.id ? merged : t)));
+          // 8) Обновляем в общем списке
+          setTasks(prev => prev.map(t => (t.id === refreshed.id ? normalized : t)));
+
+          // Закрываем модалку
+          setModalOpen(false);
+          setEditingTask(null);
         } catch (e) {
           console.error(e);
-          setTasks(prevTasks); // откат
+          setTasks(prevTasks); // откат оптимистики
           alert('Не удалось сохранить задачу.');
         }
       } else {
-        // ===== Создание =====
+        // ===== РЕЖИМ СОЗДАНИЯ =====
+        // 1) Создаём задачу
         const created = await createTask(payload);
 
+        // 2) Если прикладывали файлы — грузим их
+        const { __newFiles = [] } = formPayload;
+        for (let i = 0; i < __newFiles.length; i++) {
+          try {
+            await uploadOneImage(created.id, __newFiles[i], i);
+          } catch (err) {
+            console.warn('uploadOneImage:', err);
+          }
+        }
+
+        // 3) Подтягиваем полную задачу с сервера (важно: с credentials)
+        const createdFull = await fetch(`${BASE_URL}/api/tasks/${created.id}/`, { credentials: 'include' })
+          .then(r => r.json());
+
         const createdNormalized = {
-          ...created,
-          ...(created.responsible !== undefined
-            ? { responsible: toRespObj(created.responsible, users) }
+          ...createdFull,
+          ...(createdFull.responsible !== undefined
+            ? { responsible: toRespObj(createdFull.responsible, users) }
             : (payload.responsible_id !== undefined
               ? { responsible: toRespObj(payload.responsible_id, users) }
               : {})),
@@ -291,11 +444,12 @@ export default function App() {
           ...(payload.done_color !== undefined ? { done_color: payload.done_color } : {}),
         };
 
+        // 4) Вставляем в начало списка
         setTasks(prev => [createdNormalized, ...prev]);
+        setSearchQuery(""); // чтобы новая задача не спряталась под поиском
+        setModalOpen(false);
+        setEditingTask(null);
       }
-
-      setModalOpen(false);
-      setEditingTask(null);
     } catch (e) {
       console.error(e);
       alert('Не удалось сохранить задачу.');
@@ -303,6 +457,8 @@ export default function App() {
       setSaving(false);
     }
   };
+
+
 
 
 

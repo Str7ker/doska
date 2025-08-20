@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { FaTimes } from "react-icons/fa";
 import { MdPeople } from "react-icons/md";
+import TaskImages from "./TaskImages";
 
 const PRIORITY_VIEW = {
-    low: { label: 'Низкий', cls: 'bg-[#C3FFBC] border border-green text-[#258419]' },
-    medium: { label: 'Средний', cls: 'bg-[#FFFED7] border border-yellow text-yellow' },
-    high: { label: 'Высокий', cls: 'bg-[#FFBCBC] border border-[#FFAAAA] text-red' },
-    critical: { label: 'Критичный', cls: 'bg-red text-white border border-red' },
+    low: { label: "Низкий", cls: "bg-[#C3FFBC] border border-green text-[#258419]" },
+    medium: { label: "Средний", cls: "bg-[#FFFED7] border border-yellow text-yellow" },
+    high: { label: "Высокий", cls: "bg-[#FFBCBC] border border-[#FFAAAA] text-red" },
+    critical: { label: "Критичный", cls: "bg-red text-white border border-red" },
 };
 
 const COLUMNS = [
@@ -39,21 +40,26 @@ export default function AddTaskModal({
         responsible: "",
         priority: "medium",
         due_date: "",
+        __newFiles: [],
+        __deleteImageIds: [],
+        __reorder: [],
     });
 
-    // При открытии модалки: сбрасываем либо заполняем из initialTask
+    // При открытии модалки: сброс или заполнение из initialTask
     useEffect(() => {
         if (!open) return;
 
         if (isEdit) {
             setForm({
-                title: initialTask.title || "",
-                description: initialTask.description || "",
-                column: initialTask.column || "new",
-                responsible: initialTask.responsible ? String(initialTask.responsible.id) : "",
-                priority: initialTask.priority || "medium",
-                // приводим к yyyy-mm-dd если есть
-                due_date: initialTask.due_date || "",
+                title: initialTask?.title || "",
+                description: initialTask?.description || "",
+                column: initialTask?.column || "new",
+                responsible: initialTask?.responsible ? String(initialTask.responsible.id) : "",
+                priority: initialTask?.priority || "medium",
+                due_date: initialTask?.due_date || "",
+                __newFiles: [],
+                __deleteImageIds: [],
+                __reorder: [],
             });
         } else {
             setForm({
@@ -63,6 +69,9 @@ export default function AddTaskModal({
                 responsible: "",
                 priority: "medium",
                 due_date: "",
+                __newFiles: [],
+                __deleteImageIds: [],
+                __reorder: [],
             });
         }
     }, [open, isEdit, initialTask]);
@@ -78,7 +87,7 @@ export default function AddTaskModal({
         e.preventDefault();
         if (!form.title.trim()) return alert("Введите заголовок задачи");
 
-        // Готовим полезную нагрузку для API
+        // Полезная нагрузка для API
         const payload = {
             title: form.title.trim(),
             description: form.description.trim(),
@@ -86,6 +95,9 @@ export default function AddTaskModal({
             priority: form.priority,
             due_date: form.due_date || null,
             responsible_id: form.responsible ? Number(form.responsible) : null,
+            __newFiles: form.__newFiles || [],
+            __deleteImageIds: form.__deleteImageIds || [],
+            __reorder: form.__reorder || [],
         };
 
         onSubmit(payload);
@@ -94,7 +106,7 @@ export default function AddTaskModal({
     return (
         <div className="fixed inset-0 z-50">
             {/* затемнение */}
-            <div className="absolute inset-0 bg-black/40 " onClick={onClose} />
+            <div className="absolute inset-0 bg-black/40" onClick={onClose} />
             {/* модалка */}
             <div className="absolute inset-0 flex items-center justify-center p-4">
                 <div className="w-full max-w-xl rounded-2xl bg-white shadow-xl border border-gray overflow-hidden">
@@ -107,10 +119,7 @@ export default function AddTaskModal({
                         ) : (
                             <h3 className="text-16 font-medium text-dark">Добавить задачу</h3>
                         )}
-                        <button
-                            className="p-2 rounded-lg hover:bg-black/5 transition"
-                            onClick={onClose}
-                        >
+                        <button className="p-2 rounded-lg hover:bg-black/5 transition" onClick={onClose}>
                             <FaTimes className="w-4 h-4 text-gray-600" />
                         </button>
                     </div>
@@ -153,8 +162,10 @@ export default function AddTaskModal({
                                         onChange={handleChange}
                                         className="flex-1 py-2 outline-none bg-transparent"
                                     >
-                                        {COLUMNS.map(c => (
-                                            <option key={c.value} value={c.value}>{c.label}</option>
+                                        {COLUMNS.map((c) => (
+                                            <option key={c.value} value={c.value}>
+                                                {c.label}
+                                            </option>
                                         ))}
                                     </select>
                                 </div>
@@ -171,7 +182,7 @@ export default function AddTaskModal({
                                         className="flex-1 py-2 outline-none bg-transparent"
                                     >
                                         <option value="">Не назначен</option>
-                                        {users.map(u => (
+                                        {users.map((u) => (
                                             <option key={u.id} value={u.id}>
                                                 {u.username || u.email || `user#${u.id}`}
                                             </option>
@@ -186,7 +197,7 @@ export default function AddTaskModal({
                             <div>
                                 <label className="block text-14 text-gray-700 mb-1">Приоритет</label>
                                 <div className="flex items-center border border-[#D8D8D8] rounded-lg px-3">
-                                    <div className={`${PRIORITY_VIEW[form.priority]?.cls || ''} text-12 px-[5px] py-[2px] rounded-[5px]`}>
+                                    <div className={`${PRIORITY_VIEW[form.priority]?.cls || ""} text-12 px-[5px] py-[2px] rounded-[5px]`}>
                                         {PRIORITY_VIEW[form.priority]?.label}
                                     </div>
                                     <select
@@ -196,7 +207,9 @@ export default function AddTaskModal({
                                         className="flex-1 py-2 outline-none bg-transparent ml-2"
                                     >
                                         {Object.entries(PRIORITY_VIEW).map(([val, info]) => (
-                                            <option key={val} value={val}>{info.label}</option>
+                                            <option key={val} value={val}>
+                                                {info.label}
+                                            </option>
                                         ))}
                                     </select>
                                 </div>
@@ -220,6 +233,19 @@ export default function AddTaskModal({
                             </div>
                         </div>
 
+                        {/* Картинки */}
+                        <TaskImages
+                            existing={initialTask?.images || []}
+                            onChange={({ files, deleteIds, reorder }) => {
+                                setForm((prev) => ({
+                                    ...prev,
+                                    __newFiles: files,
+                                    __deleteImageIds: deleteIds,
+                                    __reorder: reorder,
+                                }));
+                            }}
+                        />
+
                         {/* Кнопки */}
                         <div className="flex items-center justify-end gap-2 pt-2">
                             <button
@@ -238,7 +264,6 @@ export default function AddTaskModal({
                             </button>
                         </div>
                     </form>
-
                 </div>
             </div>
         </div>

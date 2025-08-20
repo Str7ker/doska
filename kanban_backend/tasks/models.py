@@ -37,12 +37,12 @@ class Task(models.Model):
         ordering = ['position']
 
 class TaskImage(models.Model):
-    task = models.ForeignKey(Task, related_name='images', on_delete=models.CASCADE)
-    image = models.ImageField(upload_to='task_images/')
-    position = models.PositiveSmallIntegerField(default=0)
+    task = models.ForeignKey(Task, related_name="images", on_delete=models.CASCADE)
+    image = models.ImageField(upload_to="tasks/")
+    position = models.PositiveIntegerField(default=0)
 
     class Meta:
-        ordering = ['position', 'id']
-
-    def __str__(self):
-        return f'TaskImage({self.id}) for Task #{self.task_id}'
+        ordering = ["position"]
+        constraints = [
+            models.UniqueConstraint(fields=["task", "position"], name="unique_task_position"),
+        ]
