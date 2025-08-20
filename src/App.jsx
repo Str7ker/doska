@@ -38,13 +38,33 @@ export default function App() {
 
   // === API helper ===
   const deleteTask = async (id) => {
-    const res = await fetch(`${BASE_URL}/api/tasks/${id}/`, {
-      method: 'DELETE',
-      credentials: 'include',
-    });
-    if (!res.ok && res.status !== 204) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`DELETE ${id} failed: ${res.status} ${text}`);
+    const getCookie = (name) => (document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)')?.pop() || '');
+
+    const doDelete = async () => {
+      const res = await fetch(`${BASE_URL}/api/tasks/${id}/`, {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: {
+          'X-CSRFToken': getCookie('csrftoken'),
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+      });
+      if (!res.ok && res.status !== 204) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`DELETE ${id} failed: ${res.status} ${text}`);
+      }
+    };
+
+    try {
+      await doDelete();
+    } catch (e) {
+      // если токена нет/просрочен — подтянуть и попробовать ещё раз
+      if (String(e.message).includes('403') && /CSRF|csrf/i.test(e.message)) {
+        await fetch(`${BASE_URL}/api/csrf/`, { credentials: 'include' });
+        await doDelete();
+      } else {
+        throw e;
+      }
     }
   };
 
