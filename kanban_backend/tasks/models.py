@@ -2,6 +2,24 @@
 from django.db import models
 from django.contrib.auth.models import User
 
+# ---- Профиль пользователя ----
+class UserProfile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    display_name = models.CharField("Отображаемое имя", max_length=255, blank=True, default="")
+    role = models.CharField("Роль", max_length=64, blank=True, default="")
+
+    def __str__(self):
+        return self.display_name or self.user.username
+
+# авто-создание профиля при создании пользователя
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+
+@receiver(post_save, sender=User)
+def create_user_profile(sender, instance, created, **kwargs):
+    if created:
+        UserProfile.objects.create(user=instance)
+
 class Task(models.Model):
     COLUMN_CHOICES = [
         ('new', 'Новые'),

@@ -184,7 +184,7 @@ export default function AddTaskModal({
                                         <option value="">Не назначен</option>
                                         {users.map((u) => (
                                             <option key={u.id} value={u.id}>
-                                                {u.username || u.email || `user#${u.id}`}
+                                                {u.display_name || u.username || u.email || `user#${u.id}`}
                                             </option>
                                         ))}
                                     </select>

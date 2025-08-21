@@ -508,10 +508,11 @@ export default function App() {
       <Header
         logoSrc="/logo.svg"
         projectLabel="Проекты"
-        username={me?.username || "Пользователь"}
-        unreadCount={0}
+        username={me?.display_name || me?.username}
+        role={me?.role || "Пользователь"}
         onLogout={handleLogout}
       />
+
 
       <div className="py-10 px-4 ">
         <div className="max-w-screen-2xl mx-auto">

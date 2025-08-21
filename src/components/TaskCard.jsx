@@ -11,6 +11,9 @@ import {
 import { IoCalendarOutline } from "react-icons/io5";
 import { Draggable } from "@hello-pangea/dnd";
 
+const displayName = (u) => u?.display_name || u?.username || u?.email || (u ? `user#${u.id}` : "");
+
+
 const pluralDays = (n) => {
     const abs = Math.abs(n) % 100;
     const last = abs % 10;
@@ -154,8 +157,8 @@ export default function TaskCard({ task, index, onEdit, onDelete }) {
                         <div className="flex justify-between items-center">
                             <div className="flex items-center gap-2 px-[10px] py-[2px] rounded-[10px] bg-[#CACACA33] w-fit">
                                 <MdPeople className="w-4 h-4 text-dark" />
-                                <span className="text-14 font-medium">
-                                    {task.responsible ? task.responsible.username : "Не назначен"}
+                                <span className="text-14 font-medium" title={displayName(task.responsible)}>
+                                    {task.responsible ? displayName(task.responsible) : "Не назначен"}
                                 </span>
                             </div>
                             {task.column === 'done' ? (

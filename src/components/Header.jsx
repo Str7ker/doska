@@ -62,7 +62,7 @@ export default function Header({
                         {/* Имя пользователя + должность (без рамок и аватарок) */}
                         <div className="hidden sm:flex flex-col items-start leading-tight">
                             <span className="text-142 text-dark font-medium">{username}</span>
-                            <span className="text-12 text-gray-500 mt-0.5">{role}</span>
+                            <span className="text-122 text-gray-500 mt-0.5">{role}</span>
                         </div>
 
                         {/* Иконка выхода с подтверждением */}
