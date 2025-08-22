@@ -5,7 +5,22 @@ from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 from django.contrib.auth.models import User
 from django.contrib.auth.forms import UserChangeForm, UserCreationForm
 
-from .models import UserProfile, Task, TaskImage
+from .models import UserProfile, Task, TaskImage, Project
+
+@admin.register(Project)
+class ProjectAdmin(admin.ModelAdmin):
+    list_display = ("id", "title", "short_desc", "tasks_total", "created_at")
+    search_fields = ("title", "description")
+    readonly_fields = ("created_at", "updated_at")
+
+    def short_desc(self, obj):
+        return (obj.description or "")[:60]
+    short_desc.short_description = "Описание"
+
+    def tasks_total(self, obj):
+        return obj.tasks.count()
+    tasks_total.short_description = "Задач"
+
 
 
 # --- Формы пользователя с доп. полями профиля ---

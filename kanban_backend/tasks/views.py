@@ -4,28 +4,32 @@ from django.db.models import Max, F
 from django.http import JsonResponse
 from django.middleware.csrf import get_token
 from django.contrib.auth.models import User
+from django.contrib.auth import authenticate, login as dj_login, logout as dj_logout
 
 from rest_framework import viewsets, permissions, status, parsers
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
-from .models import Task, TaskImage
-from .serializers import TaskSerializer, TaskImageSerializer, UserSerializer
-from django.contrib.auth import authenticate, login as dj_login, logout as dj_logout
+from .models import Task, TaskImage, Project   # <- ВАЖНО: Project из models
+from .serializers import (                     # <- ВАЖНО: ProjectSerializer из serializers
+    TaskSerializer,
+    TaskImageSerializer,
+    UserSerializer,
+    ProjectSerializer,
+)
 
-# === NEW: Pillow-based compression ===
+# === Pillow-based compression ===
 from io import BytesIO
 from django.core.files.uploadedfile import InMemoryUploadedFile
 from PIL import Image
 import os
 import uuid
 
-MAX_SIDE = 2560            # max длинная сторона
-WEBP_QUALITY = 82          # баланс “не видно артефактов” / “вес заметно меньше”
-PNG_COMPRESS_LEVEL = 6     # компрессия PNG (0-9)
+MAX_SIDE = 2560
+WEBP_QUALITY = 82
+PNG_COMPRESS_LEVEL = 6
 
 def _has_alpha(pil: Image.Image) -> bool:
-    # RGBA/LA — точно есть альфа; P может содержать прозрачность через palette
     return pil.mode in ("RGBA", "LA") or (pil.mode == "P" and "transparency" in pil.info)
 
 def _resize_down(pil: Image.Image) -> Image.Image:
@@ -35,30 +39,16 @@ def _resize_down(pil: Image.Image) -> Image.Image:
         return pil
     scale = MAX_SIDE / float(long_side)
     new_size = (int(w * scale), int(h * scale))
-    # LANCZOS — максимально качественный ресемплинг
     return pil.resize(new_size, Image.Resampling.LANCZOS)
 
 def compress_image_to_best(file_obj, prefer_webp=True):
-    """
-    Принимает загруженный файл (UploadedFile), возвращает (InMemoryUploadedFile, new_filename).
-    - Если есть прозрачность — сохраняем PNG.
-    - Иначе сохраняем WebP (если prefer_webp=True), либо JPEG.
-    - Всегда уменьшаем до MAX_SIDE по длинной стороне.
-    """
     file_obj.seek(0)
     with Image.open(file_obj) as im:
-        # Некоторые форматы требуют load() перед конвертацией
         im.load()
-
-        # Удаляем профили/EXIF, понизим вес
         im.info.pop("icc_profile", None)
         im.info.pop("exif", None)
 
-        # Приведём к правильному цветовому пространству
-        # (для JPEG/WebP нужен 3‑канальный RGB)
         has_alpha = _has_alpha(im)
-
-        # Ресайз вниз при необходимости
         im = _resize_down(im)
 
         buffer = BytesIO()
@@ -66,40 +56,39 @@ def compress_image_to_best(file_obj, prefer_webp=True):
         base, _ext = os.path.splitext(orig_name)
 
         if has_alpha:
-            # сохраняем PNG, чтобы не потерять прозрачность
             if im.mode not in ("RGBA", "LA"):
                 im = im.convert("RGBA")
             im.save(buffer, format="PNG", optimize=True, compress_level=PNG_COMPRESS_LEVEL)
             new_ext = ".png"
         else:
-            # фото без прозрачности: WebP или JPEG
-            if im.mode not in ("RGB",):
+            if im.mode != "RGB":
                 im = im.convert("RGB")
             if prefer_webp:
                 im.save(buffer, format="WEBP", quality=WEBP_QUALITY, method=6)
                 new_ext = ".webp"
             else:
-                # альтернатива — JPEG (если вдруг нужно)
                 im.save(buffer, format="JPEG", quality=86, optimize=True, progressive=True)
                 new_ext = ".jpg"
 
         buffer.seek(0)
         new_name = f"{base}{new_ext}"
-        # content_type подставляем по расширению
-        content_type = (
-            "image/png" if new_ext == ".png"
-            else ("image/webp" if new_ext == ".webp" else "image/jpeg")
-        )
+        content_type = "image/png" if new_ext == ".png" else ("image/webp" if new_ext == ".webp" else "image/jpeg")
 
-        out = InMemoryUploadedFile(
+        return InMemoryUploadedFile(
             file=buffer,
             field_name="image",
             name=new_name,
             content_type=content_type,
             size=buffer.getbuffer().nbytes,
             charset=None,
-        )
-        return out, new_name
+        ), new_name
+
+
+# ---- Auth / CSRF / Me ----
+@api_view(["GET"])
+@permission_classes([permissions.AllowAny])
+def csrf(request):
+    return JsonResponse({"detail": "CSRF cookie set", "csrftoken": get_token(request)})
 
 @api_view(["GET"])
 @permission_classes([permissions.AllowAny])
@@ -112,16 +101,13 @@ def me(request):
 @api_view(["POST"])
 @permission_classes([permissions.AllowAny])
 def login(request):
-    # Требуется CSRF: перед этим фронт дергает /api/csrf/
     username = (request.data.get("username") or "").strip()
     password = (request.data.get("password") or "")
     if not username or not password:
         return Response({"detail": "Введите логин и пароль"}, status=400)
-
     user = authenticate(request, username=username, password=password)
     if user is None:
         return Response({"detail": "Неверный логин или пароль"}, status=400)
-
     dj_login(request, user)
     data = UserSerializer(user, context={"request": request}).data
     return Response(data, status=200)
@@ -134,27 +120,16 @@ def logout(request):
 
 @api_view(["GET"])
 @permission_classes([permissions.AllowAny])
-def csrf(request):
-    return JsonResponse({"detail": "CSRF cookie set", "csrftoken": get_token(request)})
-
-
-@api_view(["GET"])
-@permission_classes([permissions.AllowAny])
 def users_list(request):
     qs = User.objects.all().only("id", "username").order_by("id")
     data = UserSerializer(qs, many=True, context={"request": request}).data
     return Response(data)
 
 
-class TaskViewSet(viewsets.ModelViewSet):
-    queryset = (
-        Task.objects
-        .select_related("responsible")
-        .prefetch_related("images")
-        .all()
-        .order_by("position", "id")
-    )
-    serializer_class = TaskSerializer
+# ---- Projects ----
+class ProjectViewSet(viewsets.ModelViewSet):
+    queryset = Project.objects.all().order_by("-id")
+    serializer_class = ProjectSerializer
     permission_classes = [permissions.AllowAny]
 
     def get_serializer_context(self):
@@ -163,11 +138,36 @@ class TaskViewSet(viewsets.ModelViewSet):
         return ctx
 
 
+# ---- Tasks ----
+class TaskViewSet(viewsets.ModelViewSet):
+    serializer_class = TaskSerializer
+    permission_classes = [permissions.AllowAny]
+
+    def get_queryset(self):
+        qs = (
+            Task.objects
+            .select_related("responsible", "project")
+            .prefetch_related("images")
+            .all()
+        )
+        # фильтр по проекту: /api/tasks/?project=ID
+        project_id = self.request.query_params.get("project")
+        if project_id:
+            qs = qs.filter(project_id=project_id)
+        return qs.order_by("position", "id")
+
+    def get_serializer_context(self):
+        ctx = super().get_serializer_context()
+        ctx["request"] = self.request
+        return ctx
+
+
+# ---- Task Images ----
 class TaskImageViewSet(viewsets.ModelViewSet):
     """
-    POST /api/task-images/        -> загрузить новое изображение (с компрессией; кладём в конец)
-    PATCH /api/task-images/<id>/  -> безопасный реордер (position / task)
-    DELETE /api/task-images/<id>/ -> удалить
+    POST   /api/task-images/        -> загрузить новое изображение (с компрессией; кладём в конец)
+    PATCH  /api/task-images/<id>/   -> безопасный реордер (position / task)
+    DELETE /api/task-images/<id>/   -> удалить
     """
     queryset = TaskImage.objects.select_related("task").all()
     serializer_class = TaskImageSerializer
@@ -189,12 +189,6 @@ class TaskImageViewSet(viewsets.ModelViewSet):
         return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
     def create(self, request, *args, **kwargs):
-        """
-        Ожидает: multipart form-data
-          - task: int (обяз.)
-          - image: file (обяз.)
-          - position: int (игнорируем — ставим в конец, чтобы не ловить UniqueConstraint)
-        """
         task_id = request.data.get("task")
         file_in = request.data.get("image")
         if not task_id or not file_in:
@@ -205,15 +199,11 @@ class TaskImageViewSet(viewsets.ModelViewSet):
         except Task.DoesNotExist:
             return Response({"detail": "Task not found"}, status=404)
 
-        # === ВАЖНО: компрессия перед сохранением ===
         try:
             compressed_file, _name = compress_image_to_best(file_in, prefer_webp=True)
-        except Exception as e:
-            # Если вдруг Pillow не смог обработать — сохраняем как есть, чтобы не блокировать
-            # но лучше посмотреть логи и исправить
+        except Exception:
             compressed_file = file_in
 
-        # Позицию вычисляем сами: в конец
         last = TaskImage.objects.filter(task=task).aggregate(m=Max("position"))["m"]
         next_pos = 0 if last is None else last + 1
 
@@ -225,11 +215,6 @@ class TaskImageViewSet(viewsets.ModelViewSet):
 
     @transaction.atomic
     def partial_update(self, request, *args, **kwargs):
-        """
-        Безопасный реордер:
-        - если пришёл `task` — переносим в другую задачу (ставим в конец новой)
-        - если пришёл `position` — переставляем внутри задачи с полной переиндексацией
-        """
         instance: TaskImage = self.get_object()
         new_task_id = request.data.get("task", None)
         new_pos_raw = request.data.get("position", None)
