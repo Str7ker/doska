@@ -20,9 +20,15 @@ class UserSerializer(serializers.ModelSerializer):
         return prof.display_name if (prof and prof.display_name) else obj.username
 
 class ProjectSerializer(serializers.ModelSerializer):
+    participants = UserSerializer(many=True, read_only=True)
+    participants_ids = serializers.PrimaryKeyRelatedField(
+        many=True, queryset=User.objects.all(), source="participants", write_only=True, required=False
+    )
     class Meta:
         model = Project
-        fields = ['id', 'title', 'description', 'created_at', 'updated_at']
+        fields = ['id', 'title', 'description', 'due_date',
+                  'participants', 'participants_ids',
+                  'created_at', 'updated_at']
 
 class TaskImageSerializer(serializers.ModelSerializer):
     url = serializers.SerializerMethodField()
@@ -41,29 +47,31 @@ class TaskImageSerializer(serializers.ModelSerializer):
 class TaskSerializer(serializers.ModelSerializer):
     project = ProjectSerializer(read_only=True)
     project_id = serializers.PrimaryKeyRelatedField(
-        queryset=Project.objects.all(),
-        source='project',
-        write_only=True,
-        required=False,
-        allow_null=True,
+        queryset=Project.objects.all(), source='project', write_only=True, required=False, allow_null=True
     )
     responsible = UserSerializer(read_only=True)
     responsible_id = serializers.PrimaryKeyRelatedField(
-        queryset=User.objects.all(),
-        source='responsible',
-        write_only=True,
-        required=False,
-        allow_null=True,
+        queryset=User.objects.all(), source='responsible', write_only=True, required=False, allow_null=True
     )
     images = TaskImageSerializer(many=True, read_only=True)
 
     class Meta:
         model = Task
         fields = [
-            'id', 'title', 'description', 'column', 'position',
-            'priority', 'due_date',
-            'project', 'project_id',
-            'responsible', 'responsible_id',
+            'id','title','description','column','position',
+            'priority','due_date',
+            'project','project_id',
+            'responsible','responsible_id',
             'images',
-            # 'completed_at',
         ]
+
+    def validate(self, attrs):
+        # проект задачи (при создании берём из attrs, при обновлении — из instance)
+        project = attrs.get('project') or getattr(self.instance, 'project', None)
+        responsible = attrs.get('responsible', getattr(self.instance, 'responsible', None))
+        if responsible and project:
+            if not project.participants.filter(id=responsible.id).exists():
+                raise serializers.ValidationError({
+                    'responsible_id': 'Этот пользователь не состоит в проекте и не может быть ответственным.'
+                })
+        return attrs

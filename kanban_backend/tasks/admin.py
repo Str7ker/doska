@@ -9,17 +9,15 @@ from .models import UserProfile, Task, TaskImage, Project
 
 @admin.register(Project)
 class ProjectAdmin(admin.ModelAdmin):
-    list_display = ("id", "title", "short_desc", "tasks_total", "created_at")
+    list_display = ("id", "title", "due_date", "participants_count", "created_at")
     search_fields = ("title", "description")
     readonly_fields = ("created_at", "updated_at")
+    fields = ("title", "description", "due_date", "participants", "created_at", "updated_at")
+    filter_horizontal = ("participants",)  # удобный выбор многих пользователей
 
-    def short_desc(self, obj):
-        return (obj.description or "")[:60]
-    short_desc.short_description = "Описание"
-
-    def tasks_total(self, obj):
-        return obj.tasks.count()
-    tasks_total.short_description = "Задач"
+    def participants_count(self, obj):
+        return obj.participants.count()
+    participants_count.short_description = "Участников"
 
 
 

@@ -5,11 +5,20 @@ from django.contrib.auth.models import User
 class Project(models.Model):
     title = models.CharField("Название проекта", max_length=255)
     description = models.TextField("Описание", blank=True, default="")
+    due_date = models.DateField("Срок сдачи", null=True, blank=True)  # ← дедлайн
+    participants = models.ManyToManyField(                       # ← участники проекта
+        User,
+        blank=True,
+        related_name="projects",
+        verbose_name="Участники",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["-id"]
+        verbose_name = "Проект"
+        verbose_name_plural = "Проекты"
 
     def __str__(self):
         return self.title

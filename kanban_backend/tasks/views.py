@@ -9,6 +9,7 @@ from django.contrib.auth import authenticate, login as dj_login, logout as dj_lo
 from rest_framework import viewsets, permissions, status, parsers
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
+from rest_framework.decorators import api_view, permission_classes, action
 
 from .models import Task, TaskImage, Project   # <- ВАЖНО: Project из models
 from .serializers import (                     # <- ВАЖНО: ProjectSerializer из serializers
@@ -119,47 +120,77 @@ def logout(request):
     return Response({"detail": "ok"}, status=200)
 
 @api_view(["GET"])
-@permission_classes([permissions.AllowAny])
+@permission_classes([permissions.IsAuthenticated])
 def users_list(request):
-    qs = User.objects.all().only("id", "username").order_by("id")
+    project_id = request.query_params.get("project")
+    if project_id:
+        try:
+            project = Project.objects.get(pk=project_id)
+        except Project.DoesNotExist:
+            return Response({"detail":"Проект не найден"}, status=404)
+        qs = project.participants.all().order_by("id")
+    else:
+        # если нужно — ограничьте по участию в ЛЮБЫХ проектах пользователя
+        qs = User.objects.all().order_by("id")
     data = UserSerializer(qs, many=True, context={"request": request}).data
     return Response(data)
 
 
-# ---- Projects ----
 class ProjectViewSet(viewsets.ModelViewSet):
-    queryset = Project.objects.all().order_by("-id")
     serializer_class = ProjectSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_superuser or user.is_staff:
+            return Project.objects.all().order_by("-id")
+        return Project.objects.filter(participants=user).order_by("-id")
 
     def get_serializer_context(self):
         ctx = super().get_serializer_context()
         ctx["request"] = self.request
         return ctx
 
+    @action(detail=True, methods=["get"], permission_classes=[permissions.IsAuthenticated])
+    def participants(self, request, pk=None):
+        project = self.get_object()
+        data = UserSerializer(project.participants.all().order_by("id"),
+                              many=True, context={"request": request}).data
+        return Response(data)
 
-# ---- Tasks ----
+# --- Задачи ---
 class TaskViewSet(viewsets.ModelViewSet):
     serializer_class = TaskSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        qs = (
-            Task.objects
-            .select_related("responsible", "project")
-            .prefetch_related("images")
-            .all()
-        )
-        # фильтр по проекту: /api/tasks/?project=ID
+        user = self.request.user
+        qs = (Task.objects.select_related("responsible","project")
+              .prefetch_related("images"))
+        if user.is_superuser or user.is_staff:
+            pass
+        else:
+            qs = qs.filter(project__participants=user)
         project_id = self.request.query_params.get("project")
         if project_id:
             qs = qs.filter(project_id=project_id)
-        return qs.order_by("position", "id")
+        return qs.order_by("position","id")
 
-    def get_serializer_context(self):
-        ctx = super().get_serializer_context()
-        ctx["request"] = self.request
-        return ctx
+    def perform_create(self, serializer):
+        project = serializer.validated_data.get("project")
+        user = self.request.user
+        if not project:
+            raise ValidationError({"project_id": "project_id обязателен"})
+        if not (user.is_superuser or user.is_staff or project.participants.filter(id=user.id).exists()):
+            return Response({"detail":"Вы не участник проекта"}, status=403)
+        serializer.save()
+
+    def perform_update(self, serializer):
+        project = serializer.validated_data.get("project") or getattr(self.get_object(), "project", None)
+        user = self.request.user
+        if project and not (user.is_superuser or user.is_staff or project.participants.filter(id=user.id).exists()):
+            return Response({"detail":"Вы не участник проекта"}, status=403)
+        serializer.save()
 
 
 # ---- Task Images ----
