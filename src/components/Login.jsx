@@ -1,6 +1,7 @@
 // src/components/Login.jsx
 import { useState } from "react";
 import { MdVisibility, MdVisibilityOff } from "react-icons/md";
+import { useNavigate } from "react-router-dom";   // <— добавь
 
 export default function Login({ baseUrl = "http://localhost:8000", onSuccess }) {
     const [username, setUsername] = useState("");
@@ -9,10 +10,11 @@ export default function Login({ baseUrl = "http://localhost:8000", onSuccess }) 
     const [loading, setLoading] = useState(false);
     const [err, setErr] = useState("");
 
-    const getCookie = (name) => {
-        const m = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
-        return m ? m.pop() : '';
-    };
+    const getCookie = (name) =>
+        document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)')?.pop() || '';
+
+    const navigate = useNavigate();                 // <— добавь
+
 
     const submit = async (e) => {
         e.preventDefault();
@@ -43,6 +45,7 @@ export default function Login({ baseUrl = "http://localhost:8000", onSuccess }) 
                 return;
             }
             onSuccess?.(data); // передаем объект пользователя наверх
+            navigate("/projects", { replace: true });
         } catch (e) {
             setErr("Сетевая ошибка");
         } finally {
