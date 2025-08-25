@@ -7,9 +7,10 @@ from django.contrib.auth.models import User
 from django.contrib.auth import authenticate, login as dj_login, logout as dj_logout
 
 from rest_framework import viewsets, permissions, status, parsers
-from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes, action
+from rest_framework.exceptions import PermissionDenied, ValidationError
+
 
 from .models import Task, TaskImage, Project   # <- ВАЖНО: Project из models
 from .serializers import (                     # <- ВАЖНО: ProjectSerializer из serializers
@@ -182,14 +183,14 @@ class TaskViewSet(viewsets.ModelViewSet):
         if not project:
             raise ValidationError({"project_id": "project_id обязателен"})
         if not (user.is_superuser or user.is_staff or project.participants.filter(id=user.id).exists()):
-            return Response({"detail":"Вы не участник проекта"}, status=403)
+            raise PermissionDenied("Вы не участник проекта")
         serializer.save()
 
     def perform_update(self, serializer):
         project = serializer.validated_data.get("project") or getattr(self.get_object(), "project", None)
         user = self.request.user
         if project and not (user.is_superuser or user.is_staff or project.participants.filter(id=user.id).exists()):
-            return Response({"detail":"Вы не участник проекта"}, status=403)
+            raise PermissionDenied("Вы не участник проекта")
         serializer.save()
 
 
@@ -202,7 +203,7 @@ class TaskImageViewSet(viewsets.ModelViewSet):
     """
     queryset = TaskImage.objects.select_related("task").all()
     serializer_class = TaskImageSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
     parser_classes = [parsers.MultiPartParser, parsers.FormParser, parsers.JSONParser]
 
     def get_serializer_context(self):
