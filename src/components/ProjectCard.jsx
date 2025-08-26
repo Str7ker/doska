@@ -5,10 +5,9 @@ import { IoAlertCircleOutline, IoPeopleOutline, IoCalendarOutline, IoChevronForw
 
 function ruPlural(n, one, few, many) {
     const mod10 = n % 10, mod100 = n % 100;
-    if (mod10 === 1 && mod100 !== 11) return one;                 // 1 задача
-    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) // 2–4 задачи
-        return few;
-    return many;                                                   // 0, 5–20 задач
+    if (mod10 === 1 && mod100 !== 11) return one;
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+    return many;
 }
 
 export default function ProjectCard({ baseUrl, project, me }) {
@@ -34,7 +33,12 @@ export default function ProjectCard({ baseUrl, project, me }) {
         return d;
     }, []);
 
-    // расчёты
+    // считаем людей прямо из проекта
+    const peopleCount = Array.isArray(project?.participants)
+        ? project.participants.length
+        : 0;
+
+    // расчёты по задачам
     const metrics = useMemo(() => {
         const totalAll = tasks.length;
         const doneAll = tasks.filter(t => t.column === "done").length;
@@ -56,15 +60,7 @@ export default function ProjectCard({ baseUrl, project, me }) {
 
         const progress = totalAll ? Math.round((doneAll / totalAll) * 100) : 0;
 
-        // участники: уникальные ответственные (не null)
-        const peopleIds = new Set(tasks.map(t => t.responsible?.id).filter(Boolean));
-        const peopleCount = peopleIds.size;
-
-        return {
-            totalAll, doneAll, newAll, activeAll,
-            totalMine, doneMine, newMine, activeMine,
-            overdueMine, progress, peopleCount,
-        };
+        return { totalAll, doneAll, newAll, activeAll, totalMine, doneMine, newMine, activeMine, overdueMine, progress };
     }, [tasks, me, today]);
 
     const gotoProject = () => navigate(`/projects/${project.id}`);
@@ -113,7 +109,7 @@ export default function ProjectCard({ baseUrl, project, me }) {
                 const n = metrics.overdueMine;
                 const color = n > 0 ? "text-red" : "text-green";
                 return (
-                    <div className={`flex items-center gap-2 text-142 ${color}`}>
+                    <div className={`flex items-center gap-2 text-14 ${color}`}>
                         <IoAlertCircleOutline className="w-5 h-5" />
                         <span className="font-medium">
                             {n} {ruPlural(n, "задача просрочена", "задачи просрочены", "задач просрочено")}
@@ -129,7 +125,7 @@ export default function ProjectCard({ baseUrl, project, me }) {
                 <div className="flex items-center gap-2 text-14">
                     <IoPeopleOutline className="w-5 h-5 text-dark" />
                     <span>
-                        <span className="font-medium">{metrics.peopleCount}</span> в проекте
+                        <span className="font-medium">{peopleCount}</span> в проекте
                     </span>
                 </div>
                 <div className="flex items-center gap-2 text-14">
@@ -163,7 +159,6 @@ export default function ProjectCard({ baseUrl, project, me }) {
 function Metric({ label, mine, all, colorClass = "" }) {
     return (
         <div>
-
             <div className="text-18 font-medium text-center">
                 <span className={colorClass || "text-dark"}>{mine}</span>{" "}
                 <span className={`text-16 ${colorClass || "text-gray-500"}`}>({all})</span>
@@ -182,4 +177,3 @@ function formatRuDateLabel(dateStr) {
     const sameYear = d.getFullYear() === now.getFullYear();
     return `${d.getDate()} ${months[d.getMonth()]}${sameYear ? "" : " " + d.getFullYear()}`;
 }
-
