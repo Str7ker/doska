@@ -9,6 +9,7 @@ export default function AddProjectModal({
     onSubmit,
     users = [],
     loading = false,
+    initialProject = null, // ← если есть — редактирование
 }) {
     const [form, setForm] = useState({
         title: "",
@@ -16,20 +17,26 @@ export default function AddProjectModal({
         due_date: "",
         participants: [], // массив ID выбранных пользователей
     });
-
-    // локальный выбор "кандидата" для добавления
     const [candidateId, setCandidateId] = useState("");
 
+    // при открытии модалки заполняем из initialProject (если редактирование)
     useEffect(() => {
         if (!open) return;
-        setForm({
-            title: "",
-            description: "",
-            due_date: "",
-            participants: [],
-        });
-        setCandidateId("");
-    }, [open]);
+        if (initialProject) {
+            setForm({
+                title: initialProject.title || "",
+                description: initialProject.description || "",
+                due_date: initialProject.due_date || "",
+                participants: Array.isArray(initialProject.participants)
+                    ? initialProject.participants.map((u) => u.id)
+                    : [],
+            });
+            setCandidateId("");
+        } else {
+            setForm({ title: "", description: "", due_date: "", participants: [] });
+            setCandidateId("");
+        }
+    }, [open, initialProject]);
 
     const availableUsers = useMemo(
         () => users.filter((u) => !form.participants.includes(u.id)),
@@ -52,10 +59,7 @@ export default function AddProjectModal({
     };
 
     const removeParticipant = (id) => {
-        setForm((s) => ({
-            ...s,
-            participants: s.participants.filter((p) => p !== id),
-        }));
+        setForm((s) => ({ ...s, participants: s.participants.filter((p) => p !== id) }));
     };
 
     const handleSubmit = (e) => {
@@ -68,7 +72,7 @@ export default function AddProjectModal({
             title: form.title.trim(),
             description: form.description.trim(),
             due_date: form.due_date || null,
-            participants_ids: form.participants, // поле, которое ждёт ваш ProjectSerializer
+            participants_ids: form.participants,
         };
         onSubmit?.(payload);
     };
@@ -77,14 +81,14 @@ export default function AddProjectModal({
 
     return (
         <div className="fixed inset-0 z-50">
-            {/* затемнение */}
             <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-            {/* модалка */}
             <div className="absolute inset-0 flex items-center justify-center p-4">
                 <div className="w-full max-w-xl rounded-2xl bg-white shadow-xl border border-gray overflow-hidden">
-                    {/* заголовок */}
+                    {/* Заголовок */}
                     <div className="flex items-center justify-between px-5 py-4 border-b border-[#EFEFEF]">
-                        <h3 className="text-16 font-medium text-dark">Добавить проект</h3>
+                        <h3 className="text-16 font-medium text-dark">
+                            {initialProject ? "Изменить проект" : "Добавить проект"}
+                        </h3>
                         <button className="p-2 rounded-lg hover:bg-black/5 transition" onClick={onClose}>
                             <FaTimes className="w-4 h-4 text-gray-600" />
                         </button>
@@ -125,20 +129,17 @@ export default function AddProjectModal({
                                     name="due_date"
                                     value={form.due_date || ""}
                                     onChange={handleChange}
-                                    onMouseDown={(e) => {
-                                        e.preventDefault();
-                                        e.currentTarget.showPicker?.();
-                                    }}
+                                    onMouseDown={(e) => { e.preventDefault(); e.currentTarget.showPicker?.(); }}
                                     className="flex-1 py-2 outline-none bg-transparent select-none"
                                 />
                             </div>
                         </div>
 
-                        {/* Люди в проекте (ниже дедлайна) */}
+                        {/* Люди в проекте */}
                         <div>
                             <label className="block text-14 text-gray-700 mb-1">Люди в проекте</label>
 
-                            {/* строка выбора одного пользователя + плюс */}
+                            {/* выбор одного пользователя + плюс */}
                             <div className="flex items-center gap-2">
                                 <div className="flex items-center flex-1 border border-[#D8D8D8] rounded-lg px-3 h-[39px]">
                                     <MdPeople className="w-4 h-4 text-gray-500 mr-2" />
@@ -168,7 +169,7 @@ export default function AddProjectModal({
                                 </button>
                             </div>
 
-                            {/* выбранные участники списком */}
+                            {/* выбранные участники */}
                             {form.participants.length > 0 ? (
                                 <div className="mt-2 space-y-2">
                                     {form.participants.map((id) => {
@@ -211,7 +212,7 @@ export default function AddProjectModal({
                                 disabled={loading}
                                 className="px-4 py-2 rounded-[10px] bg-darkblue text-white hover:opacity-90 transition text-14 disabled:opacity-60 disabled:cursor-not-allowed"
                             >
-                                {loading ? "Сохраняем…" : "Создать проект"}
+                                {loading ? (initialProject ? "Сохраняем…" : "Сохраняем…") : (initialProject ? "Сохранить" : "Создать проект")}
                             </button>
                         </div>
                     </form>

@@ -11,6 +11,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import TaskColumn from '../components/TaskColumn';
 import AddTaskModal from "../components/TaskModal";
 import Switch from '../components/Switch';
+import ProjectPeopleModal from "../components/ProjectPeopleModal";
 
 export default function ProjectBoard({ baseUrl, me }) {
     const { id } = useParams();
@@ -26,6 +27,10 @@ export default function ProjectBoard({ baseUrl, me }) {
     const [modalOpen, setModalOpen] = useState(false);
     const [editingTask, setEditingTask] = useState(null);
     const [saving, setSaving] = useState(false);
+
+    const [peopleOpen, setPeopleOpen] = useState(false);
+    const [allUsers, setAllUsers] = useState([]);
+    const [savingPeople, setSavingPeople] = useState(false);
 
     const columnTypes = { new: "Новые", in_progress: "Выполняются", testing: "Тестирование", review: "Правки", done: "Выполнено" };
     const colorByColumn = { new: "gray", in_progress: "darkblue", testing: "yellow", review: "red", done: "green" };
@@ -50,6 +55,42 @@ export default function ProjectBoard({ baseUrl, me }) {
             .then((data) => setUsers(Array.isArray(data) ? data : []))
             .catch(() => setUsers([]));
     }, [baseUrl, projectId]);
+
+    useEffect(() => {
+        fetch(`${baseUrl}/api/users/`, { credentials: 'include' })
+            .then(r => r.ok ? r.json() : [])
+            .then(data => setAllUsers(Array.isArray(data) ? data : []))
+            .catch(() => setAllUsers([]));
+    }, [baseUrl]);
+
+    const openPeople = () => setPeopleOpen(true);
+    const closePeople = () => setPeopleOpen(false);
+
+    const savePeople = async (ids) => {
+        try {
+            setSavingPeople(true);
+            const res = await fetch(`${baseUrl}/api/projects/${projectId}/`, {
+                method: 'PATCH',
+                credentials: 'include',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCookie('csrftoken'),
+                },
+                body: JSON.stringify({ participants_ids: ids }),
+            });
+            if (!res.ok) throw new Error(await res.text());
+            const updated = await res.json();
+
+            // обновляем проект и участников в состоянии
+            setProject(updated);
+            setUsers(Array.isArray(updated.participants) ? updated.participants : []);
+            setPeopleOpen(false);
+        } catch (e) {
+            alert(`Не удалось сохранить участников: ${e.message || e}`);
+        } finally {
+            setSavingPeople(false);
+        }
+    };
 
     // API методов (сокращённая версия; возьмите из вашего App.jsx при необходимости)
     const createTask = async (payload) => {
@@ -246,7 +287,11 @@ export default function ProjectBoard({ baseUrl, me }) {
                         <FaCircle className="w-2 h-2 text-green" />
                         <span className="text-14 font-medium">{tasks.filter(t => t.column === 'done').length} Сделано</span>
                     </div>
-                    <div className="flex items-center gap-2 px-[10px] py-[2px] rounded-[10px] bg-[#CACACA33]">
+                    <div
+                        className="flex items-center gap-2 px-[10px] py-[2px] rounded-[10px] bg-[#CACACA33] cursor-pointer hover:bg-[#CACACA55] transition"
+                        title="Управление людьми в проекте"
+                        onClick={openPeople}
+                    >
                         <MdPeople className="w-4 h-4 text-dark" />
                         <span className="text-14 font-medium">{users.length} В проекте</span>
                     </div>
@@ -329,6 +374,15 @@ export default function ProjectBoard({ baseUrl, me }) {
                     users={users}
                     loading={saving}
                     initialTask={editingTask}
+                />
+
+                <ProjectPeopleModal
+                    open={peopleOpen}
+                    onClose={closePeople}
+                    onSubmit={savePeople}
+                    allUsers={allUsers}
+                    initialIds={Array.isArray(users) ? users.map(u => u.id) : []}
+                    loading={savingPeople}
                 />
             </div>
         </div>

@@ -1,7 +1,14 @@
 // src/components/ProjectCard.jsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { IoAlertCircleOutline, IoPeopleOutline, IoCalendarOutline, IoChevronForward } from "react-icons/io5";
+import {
+    IoAlertCircleOutline,
+    IoPeopleOutline,
+    IoCalendarOutline,
+    IoChevronForward,
+} from "react-icons/io5";
+import { BsThreeDots } from "react-icons/bs";
+import { MdEdit, MdDeleteOutline } from "react-icons/md";
 
 function ruPlural(n, one, few, many) {
     const mod10 = n % 10, mod100 = n % 100;
@@ -10,12 +17,25 @@ function ruPlural(n, one, few, many) {
     return many;
 }
 
-export default function ProjectCard({ baseUrl, project, me }) {
+export default function ProjectCard({ baseUrl, project, me, onEdit, onDelete }) {
     const navigate = useNavigate();
     const [tasks, setTasks] = useState([]);
     const [loading, setLoading] = useState(true);
 
-    // грузим задачи этого проекта
+    // меню
+    const [openMenu, setOpenMenu] = useState(false);
+    const menuRef = useRef(null);
+
+    useEffect(() => {
+        const onDocClick = (e) => {
+            if (!menuRef.current) return;
+            if (!menuRef.current.contains(e.target)) setOpenMenu(false);
+        };
+        document.addEventListener("click", onDocClick);
+        return () => document.removeEventListener("click", onDocClick);
+    }, []);
+
+    // грузим задачи этого проекта (для прогресса/метрик)
     useEffect(() => {
         let alive = true;
         setLoading(true);
@@ -33,12 +53,10 @@ export default function ProjectCard({ baseUrl, project, me }) {
         return d;
     }, []);
 
-    // считаем людей прямо из проекта
     const peopleCount = Array.isArray(project?.participants)
         ? project.participants.length
         : 0;
 
-    // расчёты по задачам
     const metrics = useMemo(() => {
         const totalAll = tasks.length;
         const doneAll = tasks.filter(t => t.column === "done").length;
@@ -71,9 +89,47 @@ export default function ProjectCard({ baseUrl, project, me }) {
             tabIndex={0}
             onClick={gotoProject}
             onKeyDown={(e) => { if (e.key === "Enter") gotoProject(); }}
-            className="group rounded-2xl border border-[#D8D8D8] bg-white p-4 hover:shadow-[0_0_10px_rgba(0,0,0,0.1)] transition cursor-pointer flex flex-col gap-[10px]"
+            className="relative group rounded-2xl border border-[#D8D8D8] bg-white p-4 hover:shadow-[0_0_10px_rgba(0,0,0,0.1)] transition cursor-pointer flex flex-col gap-[10px]"
             title="Открыть проект"
         >
+            {/* Кнопка меню (три точки) */}
+            <div className="absolute top-3 right-3 z-20" ref={menuRef}>
+                <div
+                    onClick={(e) => { e.stopPropagation(); setOpenMenu((v) => !v); }}
+                    className="cursor-pointer p-[6px] rounded-[8px] hover:bg-[#F0F0F0] transition-colors"
+                    title="Меню"
+                >
+                    <BsThreeDots className="text-gray-500 text-[18px]" />
+                </div>
+
+                {openMenu && (
+                    <div
+                        className="absolute right-0 mt-1 bg-white border border-gray rounded-[10px] shadow-md w-[180px] overflow-hidden"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <button
+                            className="flex items-center gap-2 px-3 py-2 w-full hover:bg-[#CACACA]/20 transition text-14 text-dark"
+                            onClick={() => { setOpenMenu(false); onEdit?.(project); }}
+                        >
+                            <MdEdit className="w-4 h-4" />
+                            Изменить
+                        </button>
+                        <button
+                            className="flex items-center gap-2 px-3 py-2 w-full hover:bg-[#FFBCBC]/30 transition text-14 text-red"
+                            onClick={() => {
+                                setOpenMenu(false);
+                                if (confirm(`Удалить проект «${project.title}»? Действие необратимо.`)) {
+                                    onDelete?.(project);
+                                }
+                            }}
+                        >
+                            <MdDeleteOutline className="w-4 h-4" />
+                            Удалить
+                        </button>
+                    </div>
+                )}
+            </div>
+
             {/* Заголовок + описание */}
             <div>
                 <div className="text-18 font-medium text-dark mb-1">{project.title}</div>
