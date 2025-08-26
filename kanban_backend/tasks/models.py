@@ -65,7 +65,7 @@ class Task(models.Model):
 
     priority = models.CharField(max_length=10, choices=PRIORITY_CHOICES, default='medium')
     due_date = models.DateField(null=True, blank=True)
-    # completed_at = models.DateField(null=True, blank=True)  # если используете сортировку по выполнению
+    completed_at = models.DateField(null=True, blank=True)  # если используете сортировку по выполнению
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

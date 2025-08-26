@@ -78,17 +78,68 @@ export default function ProjectBoard({ baseUrl, me }) {
         if (!res.ok && res.status !== 204) throw new Error('deleteTask failed');
     };
 
+    const computeDoneColor = (task) => {
+        if (task.column !== 'done') return '';
+        if (!task.completed_at) return 'bg-gray border border-gray text-gray-700';
+
+        // НЕТ дедлайна → серый
+        if (!task.due_date) return 'bg-gray border border-gray text-gray-700';
+
+        // С дедлайном: успели → зелёный, иначе красный
+        if (task.completed_at <= task.due_date) {
+            return 'bg-[#A6FFC3] border border-green text-green-700';
+        }
+        return 'bg-[#FFBCBC] border border-red text-red';
+    };
 
     // Drag&Drop и остальная логика — как у вас (опускаю детали для краткости)
+    // ProjectBoard.jsx — onDragEnd
+    // ProjectBoard.jsx — ЗАМЕНИ функцию onDragEnd целиком
     const onDragEnd = async (result) => {
         const { destination, source, draggableId } = result;
         if (!destination) return;
-        const fromCol = source.droppableId, toCol = destination.droppableId, taskId = Number(draggableId);
+
+        const fromCol = source.droppableId;
+        const toCol = destination.droppableId;
+        const taskId = Number(draggableId);
         if (fromCol === toCol) return;
+
         const prev = tasks;
-        setTasks(ts => ts.map(t => t.id === taskId ? { ...t, column: toCol } : t));
-        try { await patchTask(taskId, { column: toCol }); } catch { setTasks(prev); }
+
+        // 1) Оптимистическое обновление: колонка, completed_at, done_color
+        setTasks(ts => ts.map(t => {
+            if (t.id !== taskId) return t;
+            const next = { ...t, column: toCol };
+
+            if (toCol === 'done') {
+                const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+                next.completed_at = next.completed_at || today;
+            }
+            if (fromCol === 'done' && toCol !== 'done') {
+                next.completed_at = null;
+            }
+
+            next.done_color = computeDoneColor(next);
+            return next;
+        }));
+
+        try {
+            // 2) Сохраняем на бэке
+            await patchTask(taskId, { column: toCol });
+
+            // 3) Тянем актуальную карточку с бэка и кладём в стейт
+            const refreshed = await fetch(`${baseUrl}/api/tasks/${taskId}/`, { credentials: 'include' })
+                .then(r => r.json());
+            const normalized = { ...refreshed, responsible: toRespObj(refreshed.responsible, users) };
+
+            setTasks(ts => ts.map(t => (t.id === taskId ? normalized : t)));
+        } catch (e) {
+            // Откатываемся при ошибке
+            setTasks(prev);
+        }
     };
+
+
 
     const toRespObj = (val, usersList) => {
         if (!val) return null;
@@ -216,6 +267,33 @@ export default function ProjectBoard({ baseUrl, me }) {
                 </div>
 
                 <hr className="w-full h-[1px] bg-[#D8D8D8] border-none mb-3" />
+
+
+                {/* Заголовки колонок */}
+                <div className="flex gap-[15px] w-full mb-3">
+                    {['gray', 'darkblue', 'yellow', 'red', 'green'].map((color, i) => (
+                        <div key={i} className="relative flex-1 px-[20px] py-[10px] rounded-[15px] border border-gray bg-white overflow-hidden">
+                            <div className={`absolute left-0 top-0 bottom-0 w-[11px] bg-${color} z-10`} />
+                            <div className="absolute left-[6px] top-1/2 -translate-y-1/2 w-[30px] h-[50px] bg-white rounded-full z-10" />
+                            <div className="relative z-20 flex justify-between items-center">
+                                <span className="text-16 text-dark">
+                                    {['Новые', 'Выполняются', 'Тестирование', 'Правки', 'Выполнено'][i]}
+                                </span>
+                                <div className="w-6 h-6 rounded-full bg-gray/50 flex items-center justify-center ml-2">
+                                    <span className="text-16 text-black">{
+                                        [
+                                            tasksByColumn.new.length,
+                                            tasksByColumn.in_progress.length,
+                                            tasksByColumn.testing.length,
+                                            tasksByColumn.review.length,
+                                            tasksByColumn.done.length
+                                        ][i]
+                                    }</span>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
 
                 <DragDropContext onDragEnd={onDragEnd}>
                     <div className="flex gap-[15px] w-full items-start">

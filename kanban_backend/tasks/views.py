@@ -9,6 +9,8 @@ from django.contrib.auth import authenticate, login as dj_login, logout as dj_lo
 from rest_framework import viewsets, permissions, status, parsers
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes, action
+from django.utils import timezone
+
 from rest_framework.exceptions import PermissionDenied, ValidationError
 
 
@@ -184,14 +186,28 @@ class TaskViewSet(viewsets.ModelViewSet):
             raise ValidationError({"project_id": "project_id обязателен"})
         if not (user.is_superuser or user.is_staff or project.participants.filter(id=user.id).exists()):
             raise PermissionDenied("Вы не участник проекта")
-        serializer.save()
+
+        col = serializer.validated_data.get("column", "new")
+        if col == 'done' and not serializer.validated_data.get("completed_at"):
+            serializer.save(completed_at=timezone.now().date())
+        else:
+            serializer.save()
 
     def perform_update(self, serializer):
-        project = serializer.validated_data.get("project") or getattr(self.get_object(), "project", None)
+        instance: Task = self.get_object()
+        project = serializer.validated_data.get("project") or instance.project
         user = self.request.user
         if project and not (user.is_superuser or user.is_staff or project.participants.filter(id=user.id).exists()):
             raise PermissionDenied("Вы не участник проекта")
-        serializer.save()
+
+        new_col = serializer.validated_data.get("column", instance.column)
+
+        if instance.column != 'done' and new_col == 'done' and not instance.completed_at:
+            serializer.save(completed_at=timezone.now().date())
+        elif instance.column == 'done' and new_col != 'done':
+            serializer.save(completed_at=None)
+        else:
+            serializer.save()
 
 
 # ---- Task Images ----
